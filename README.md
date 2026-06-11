@@ -124,10 +124,23 @@ gcTime: 1000 * 60 * 10,    // 10 minutes
 | **While fresh / active** | No refetch needed | Cache stays available |
 | **When expired** | Data goes stale → may refetch | Unused cache is deleted |
 
-- **`staleTime`** — after fetch, data is **fresh** for X time. Revisiting same search = instant, no API call.
-- **`gcTime`** — after you **leave** a query (no component using it), cache is kept for X time, then garbage collected.
+- **`staleTime`** — *"Should I refetch?"* Data is **fresh** for X time → no API call. After that, data is **stale** but can still sit in memory.
+- **`gcTime`** — *"Should I delete this from memory?"* After you **leave** a query (no component using it), unused cache is kept for X time, then **removed**.
 
-**Example:** Search `jacket` → `mens` → `jacket` again within 5 min = no API call (`staleTime`). After 10 min unused, `jacket` cache is removed (`gcTime`).
+**Why both?** They do different jobs — `staleTime` does NOT replace `gcTime`.
+
+| | `staleTime` | `gcTime` |
+|---|-------------|----------|
+| Controls | Freshness (trust data or refetch) | Memory cleanup |
+| When it matters | Query is used or revisited | Query is **unused** |
+| When expired | May refetch (old cache can still show first) | Cache **deleted** from memory |
+
+**Example** (`staleTime: 5 min`, `gcTime: 10 min`):
+1. Search `jacket` → `mens` → `jacket` within 5 min → no API call (still fresh)
+2. Search `jacket` after 7 min → stale → refetches, but old rows may show first from cache
+3. Never search `jacket` for 10+ min → cache removed → next `jacket` search = full load like first time
+
+Without `gcTime`, every old search (`jacket`, `mens`, `ssd`…) would stay in memory forever.
 
 **Note:** Use `1000` (ms), not `10000`.
 
@@ -161,6 +174,23 @@ queryKey: ['products', debouncedSearch]
 | Where | In-memory (client) | Browser / server |
 | Network request | **None** when cache hit | Request still sent |
 | When it helps | Revisit same search term | Server says "not modified" |
+
+### Client-side cache — NOT server-side
+`staleTime` / `gcTime` cache data in the **user's browser** (React Query memory). The backend does not know about it. This is **not** Redis/CDN/server caching.
+
+### Same query + `staleTime` behavior
+For the **same** `queryKey` (e.g. `['products', 'jacket']`):
+
+| When | What happens |
+|------|----------------|
+| Within `staleTime` | No API call — UI uses cached data |
+| After `staleTime` | Data is stale → API refetches (often shows old cache first, then updates) |
+
+**Stale data example:** User searches `jacket` → gets **5 rows** → cached. Admin adds 5 more on backend (**10 rows**). Within 5 min, user searches `jacket` again → **no API call** → UI still shows **5 rows**. After `staleTime` expires, next search refetches and shows 10 rows.
+
+This is the **tradeoff**: better performance vs possibly outdated UI. Fix options:
+- Shorter `staleTime` for data that changes often (e.g. `1000 * 30` = 30 sec)
+- `queryClient.invalidateQueries({ queryKey: ['products'] })` after admin updates
 
 ### What React Query replaced
 | Manual (`useEffect`) | React Query |
