@@ -39,7 +39,22 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ---
 
-## What We Built Today
+## Learning Journal
+
+| Date | Focus | Progress | Status |
+|------|-------|----------|--------|
+| **11 June 2026** | `useQuery`, caching, debounce, server state theory | **~38% overall** / **~65% fundamentals** | ✅ Done |
+| **12 June 2026** | Mutations, DevTools, advanced patterns | Target: **~50% overall** / **~80% fundamentals** | 📋 Planned |
+
+**Quick jump:** [11 June 2026](#-11-june-2026--day-1-completed) · [12 June 2026](#-12-june-2026--day-2-planned)
+
+---
+
+## 📅 11 June 2026 — Day 1 (Completed)
+
+> First session. Built the app, replaced manual `useEffect` fetching with React Query, and learned caching deeply.
+
+### What We Built
 
 ### Backend
 - Express server with `GET /api/products`
@@ -56,9 +71,7 @@ We started with the manual approach:
 ### Frontend (with React Query)
 Replaced most of that boilerplate with `useQuery`.
 
----
-
-## React Query — Steps We Completed
+### React Query — Steps Completed
 
 ### Step 1 — Setup
 - Installed `@tanstack/react-query`
@@ -160,9 +173,7 @@ useEffect(() => {
 queryKey: ['products', debouncedSearch]
 ```
 
----
-
-## What is Server State Management?
+### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
 
@@ -317,9 +328,7 @@ React Components  (read data, show UI)
 
 That's why it's a **server-state** library — it manages the **lifecycle of data that comes from the server**, not the server itself.
 
----
-
-## Important Concepts Learned
+### Important Concepts Learned
 
 ### `queryKey` vs `queryFn`
 - **`queryKey`** — *which* cache slot (label / path)
@@ -357,19 +366,68 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 | `AbortController` cleanup | Built-in cancellation |
 | No cache | Automatic per-`queryKey` cache |
 
+### Day 1 — Progress snapshot (11 June 2026)
+
+```
+Fundamentals (useQuery, cache, keys)      ████████████████░░░░  ~80%
+Practical patterns (debounce, search)     ██████████████░░░░░░  ~70%
+Theory (server state, staleTime, gcTime)  ████████████████████  ~95%
+Mutations & sync                          ██░░░░░░░░░░░░░░░░░░  ~10%
+Advanced (infinite, optimistic, suspense) ░░░░░░░░░░░░░░░░░░░░  ~0%
+```
+
+**Solid foundation for reading/fetching data.** Biggest gap: writing/updating data (`useMutation`).
+
+---
+
+## 📅 12 June 2026 — Day 2 (Planned)
+
+> Pick up here after a break. Goal: learn **mutations** and tools that make React Query production-ready.
+
+### Priority checklist
+
+- [ ] **`useMutation`** — POST / PUT / DELETE (e.g. add a product on backend + form in UI)
+- [ ] **`invalidateQueries`** (hands-on) — after mutation success, refetch products list automatically
+- [ ] **React Query DevTools** — install `@tanstack/react-query-devtools`, visualize cache live
+- [ ] **`enabled`** — only fetch when condition is met (e.g. `search.length > 2`)
+- [ ] **Global `defaultOptions`** — set `staleTime` / `gcTime` once in `QueryClient` instead of per query
+
+### Stretch goals (if time allows)
+
+- [ ] **`prefetchQuery`** — preload products before user navigates to a page
+- [ ] **Optimistic updates** — update UI instantly before API responds, rollback on error
+- [ ] **`useInfiniteQuery`** — pagination / infinite scroll on product list
+- [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
+- [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
+
+### Suggested order for Day 2
+
+1. Add `POST /api/products` on backend
+2. Build "Add Product" form with `useMutation`
+3. Call `queryClient.invalidateQueries({ queryKey: ['products'] })` on success
+4. Install DevTools and watch cache update in real time
+5. Try `enabled` or global `defaultOptions`
+
+### Target after Day 2
+
+| Area | Now (11 Jun) | Target (12 Jun) |
+|------|--------------|-----------------|
+| Overall React Query | ~38% | ~50% |
+| Core fundamentals | ~65% | ~80% |
+| Mutations & sync | ~10% | ~60% |
+
+### Topics still for later (beyond 12 June)
+
+- Parallel queries / dependent queries
+- `setQueryData` (manual cache updates)
+- Suspense mode with React Query
+- Testing queries with mock server
+
 ---
 
 ## References
 
 - [React Query Overview (ChatGPT)](https://chatgpt.com/share/6a2aa4ab-7990-83a8-8605-6fa0f2f7e7d2) — basic concepts in React Query (companion notes for this project)
-
----
-
-## What's Next (optional)
-- [ ] React Query DevTools
-- [ ] `useMutation` (POST / PUT / DELETE)
-- [ ] `invalidateQueries` after mutations
-- [ ] Re-apply product store CSS styling
 
 ---
 
