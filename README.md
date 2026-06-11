@@ -202,6 +202,12 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 
 ---
 
+## References
+
+- [React Query Overview (ChatGPT)](https://chatgpt.com/share/6a2aa4ab-7990-83a8-8605-6fa0f2f7e7d2) — basic concepts in React Query (companion notes for this project)
+
+---
+
 ## What's Next (optional)
 - [ ] React Query DevTools
 - [ ] `useMutation` (POST / PUT / DELETE)
