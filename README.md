@@ -112,19 +112,24 @@ placeholderData: keepPreviousData
 ```
 
 ### Step 6 — Caching (`staleTime` + `gcTime`)
-| Option | Purpose |
-|--------|---------|
-| `staleTime` | How long data is "fresh" — no refetch while fresh |
-| `gcTime` | How long unused cache stays in memory |
 
 ```jsx
 staleTime: 1000 * 60 * 5,  // 5 minutes
 gcTime: 1000 * 60 * 10,    // 10 minutes
 ```
 
-**Test:** Search `jacket` → search `mens` → search `jacket` again → instant result, no API call (within staleTime).
+| | `staleTime` | `gcTime` |
+|---|-------------|----------|
+| **Controls** | Is data still trustworthy? | Should we keep it in memory? |
+| **While fresh / active** | No refetch needed | Cache stays available |
+| **When expired** | Data goes stale → may refetch | Unused cache is deleted |
 
-**Note:** `1000` = milliseconds. Use `1000 * 60 * 5`, not `10000 * 60 * 5`.
+- **`staleTime`** — after fetch, data is **fresh** for X time. Revisiting same search = instant, no API call.
+- **`gcTime`** — after you **leave** a query (no component using it), cache is kept for X time, then garbage collected.
+
+**Example:** Search `jacket` → `mens` → `jacket` again within 5 min = no API call (`staleTime`). After 10 min unused, `jacket` cache is removed (`gcTime`).
+
+**Note:** Use `1000` (ms), not `10000`.
 
 ### Step 7 — Debounced search
 Typing `j-a-c-k-e-t` without debounce = 6+ API calls.  
