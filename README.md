@@ -1,6 +1,6 @@
 # React Query — Learning Project
 
-A full-stack practice app for learning **TanStack React Query** (`@tanstack/react-query`).  
+A full-stack practice app for learning **TanStack React Query** (`@tanstack/react-query`) — a **server-state management** library for fetching, caching, and syncing API data in React.  
 Backend serves 20 dummy products; frontend fetches, searches, caches, and debounces requests.
 
 ---
@@ -159,6 +159,163 @@ useEffect(() => {
 
 queryKey: ['products', debouncedSearch]
 ```
+
+---
+
+## What is Server State Management?
+
+React Query is a **server-state management** library. That name is easy to misread.
+
+> It does **not** manage state **on** the server.  
+> It manages **server data inside your React app** — fetching, caching, syncing, and sharing it.
+
+### What is "server state"?
+
+Data that **lives on the backend** but your UI needs a **local copy** of:
+
+```json
+{ "id": 1, "name": "Fjallraven Backpack", "price": 109.95 }
+```
+
+When your app runs `axios.get('/api/products')`, you get a copy in the browser. That copy is **server state** because:
+
+| Property | Meaning |
+|----------|---------|
+| **Source of truth** | The server / database — not your React component |
+| **Can change outside your app** | Admin adds products, another user edits data |
+| **Can become stale** | Your UI may show old data until you refetch |
+| **Needs synchronization** | App must fetch, cache, and refresh over time |
+
+In this project, our **products list** is server state. **`search` input text** is client state (only exists in the browser until you send it to the API).
+
+### Manual way vs React Query
+
+**Without React Query** — you own everything:
+
+```jsx
+const [products, setProducts] = useState([])
+const [loading, setLoading] = useState(false)
+const [error, setError] = useState(false)
+
+useEffect(() => {
+  fetch('/api/products').then(...)
+}, [])
+```
+
+You manually handle: loading, error, caching, refetching, stale data, cancellation.
+
+**With React Query** — data lives in a **query cache**:
+
+```jsx
+const { data: products } = useQuery({
+  queryKey: ['products', debouncedSearch],
+  queryFn: () => axios.get(`/api/products?search=${debouncedSearch}`).then(res => res.data),
+})
+```
+
+Internally (simplified):
+
+```
+React Query Cache
+└── ['products', '']
+│   └── [ 20 products... ]
+└── ['products', 'jacket']
+    └── [ 3 jacket products... ]
+```
+
+Components **read from this cache** instead of juggling their own `useState` for API data.
+
+### What state does React Query manage?
+
+It's called "state management" because it tracks all of this for you:
+
+| State | Example in our app |
+|-------|-------------------|
+| `data` | Product list array |
+| `isLoading` | First load, no products yet |
+| `isFetching` | Refetching after search change |
+| `isError` | API failed |
+| `isStale` | Cache older than `staleTime` |
+| Cache / freshness | `staleTime`, `gcTime` |
+
+```jsx
+const { data, isLoading, isError, isFetching, isStale } = useQuery(...)
+```
+
+No manual `setProducts`, `setLoading`, `setError`.
+
+### Sharing data across components (one request)
+
+**Without React Query** — duplicate fetches:
+
+```
+<Navbar />   → GET /api/user  (Request #1)
+<Profile />  → GET /api/user  (Request #2)
+```
+
+**With React Query** — same `queryKey` = shared cache:
+
+```
+useQuery({ queryKey: ['user'], queryFn: fetchUser })  // in Navbar
+useQuery({ queryKey: ['user'], queryFn: fetchUser })  // in Profile
+
+        Request #1
+             ↓
+    React Query Cache
+       ↙         ↘
+   Navbar     Profile
+```
+
+One network call, both components stay in sync. Same idea applies if two components both use `queryKey: ['products']`.
+
+### When server data changes (`useMutation` + invalidate)
+
+When a user **updates** data (e.g. edit a product), you use `useMutation`. After success:
+
+```jsx
+queryClient.invalidateQueries({ queryKey: ['products'] })
+```
+
+React Query then:
+1. Marks matching cache as **stale**
+2. **Refetches** from the API
+3. **Updates** the cache
+4. **Re-renders** all components using that query
+
+No manual "fetch again and pass data around."
+
+### React Query vs Redux / Zustand
+
+| Tool | Manages | Examples |
+|------|---------|----------|
+| **Redux / Zustand** | **Client state** | theme, sidebar open, modal open, selected tab |
+| **React Query** | **Server state** | products, users, orders, notifications |
+
+They solve different problems. Common real-world setup:
+
+```
+React Query  →  API / database data
+Zustand      →  UI-only state
+```
+
+### Mental model
+
+```
+Backend API  (source of truth)
+      ↓
+React Query Cache  (client-side copy + lifecycle)
+      ↓
+React Components  (read data, show UI)
+```
+
+**React Query's job:**
+- Fetch server data
+- Cache it (client-side)
+- Keep it fresh (`staleTime`, refetch, invalidate)
+- Share it between components
+- Sync after mutations
+
+That's why it's a **server-state** library — it manages the **lifecycle of data that comes from the server**, not the server itself.
 
 ---
 
