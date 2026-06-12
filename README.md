@@ -13,7 +13,7 @@ react-query/
 │   └── index.js      # GET /api/products + POST /api/products + optional ?search=
 └── frontend/         # React + Vite (port 5173)
     └── src/
-        ├── main.jsx  # QueryClientProvider setup
+        ├── main.jsx  # QueryClientProvider + React Query DevTools
         └── App.jsx   # useQuery + useMutation + search + debounce
 ```
 
@@ -43,8 +43,8 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–12 June 2026** | `useQuery`, caching, debounce, `useMutation`, `invalidateQueries` | **~48% overall** / **~78% fundamentals** | ✅ Day 1 done |
-| **12 June 2026** | DevTools, `enabled`, global options, advanced patterns | Target: **~55% overall** / **~85% fundamentals** | 📋 Day 2 in progress |
+| **11–12 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, cache states | **~52% overall** / **~82% fundamentals** | ✅ Day 1 done |
+| **12 June 2026** | `enabled`, global options, advanced patterns | Target: **~58% overall** / **~88% fundamentals** | 📋 Day 2 in progress |
 
 **Quick jump:** [Day 1 (completed)](#-day-1--completed-11–12-june-2026) · [Day 2 (remaining)](#-day-2--in-progress-12-june-2026)
 
@@ -52,7 +52,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## 📅 Day 1 — Completed (11–12 June 2026)
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, then added **mutations** and **cache invalidation** so the UI stays in sync after writes.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, then used **DevTools** to visualize Fresh / Stale / Inactive / Fetching / Paused cache states.
 
 ### What We Built
 
@@ -263,6 +263,71 @@ Even with a long `staleTime`, **invalidate forces a refetch** because we know th
 
 Production apps typically use **both**.
 
+### Step 11 — React Query DevTools
+
+Installed `@tanstack/react-query-devtools` and added to `main.jsx`:
+
+```jsx
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+
+<QueryClientProvider client={queryClient}>
+  <App />
+  <ReactQueryDevtools initialIsOpen={false} />
+</QueryClientProvider>
+```
+
+DevTools are a **debug window** into the in-memory cache — they don't change app behavior. Put them in `main.jsx` (next to `QueryClientProvider`) so the whole app is visible.
+
+**Five query statuses in DevTools:**
+
+| Status | Meaning | How we tested it |
+|--------|---------|------------------|
+| **Fresh** | Active query, data within `staleTime` | Load page or finish a fetch |
+| **Fetching** | API request in flight | Add product, new search, or DevTools refetch |
+| **Stale** | Data in memory but no longer trusted | `invalidateQueries`, DevTools invalidate, or `staleTime: 0` |
+| **Inactive** | Cached but no component using this `queryKey` | Search `mens` then switch to `''` — old keys stay in cache |
+| **Paused** | Fetch blocked (usually offline) | DevTools offline toggle → search new term |
+
+**Inactive + `gcTime` (important):**
+
+When you leave a search (e.g. `mens` → clear search), `['products', 'mens']` becomes **Inactive**:
+- Data **stays in memory** until `gcTime` expires (~10 min in our app)
+- **No API calls** happen just because it's sitting there inactive
+- If you search `mens` again **before** `gcTime`:
+  - Still **fresh** → **no API call** (instant from cache)
+  - **Stale** → shows cache first, then refetches
+- After `gcTime` with no observers → cache **deleted** → next `mens` = full fetch like first time
+
+```
+Search "mens" → API call → cached
+Clear search  → ["products","mens"] becomes INACTIVE (still in memory)
+Within gcTime → revisit "mens" → may serve cache with no API call (if fresh)
+After gcTime  → cache removed → revisit "mens" → new API call
+```
+
+**Stale ≠ automatic refetch when time expires**
+
+After `staleTime`, React Query marks data **stale** ("might be old") — it does **not** immediately refetch in the background.
+
+A refetch happens when data is **stale** + a **trigger** fires:
+
+| Trigger | Example |
+|---------|---------|
+| Query becomes active again | Search the same term again |
+| Window focus | Switch tabs and come back (`refetchOnWindowFocus`) |
+| Network reconnects | Wi‑Fi drops and returns |
+| `invalidateQueries` | After adding a product |
+| Manual refetch | DevTools refetch button |
+
+Hard refresh (F5) clears the in-memory cache entirely → brand-new fetch (not really a "stale refetch").
+
+```
+0 min  → fetch → FRESH
+5 min  → staleTime expires → STALE (still in memory, UI still shows data)
+       → no refetch yet until a trigger fires
+User searches again / refocuses tab → STALE + trigger → REFETCH → FRESH
+```
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -427,8 +492,9 @@ For the **same** `queryKey` (e.g. `['products', 'jacket']`):
 
 | When | What happens |
 |------|----------------|
-| Within `staleTime` | No API call — UI uses cached data |
-| After `staleTime` | Data is stale → API refetches (often shows old cache first, then updates) |
+| Within `staleTime` | No API call — UI uses cached data (**Fresh**) |
+| After `staleTime` | Data marked **stale** — still in memory; refetch only when a **trigger** fires (revisit search, tab focus, invalidate, etc.) |
+| Revisit while stale | Often shows old cache first, then refetches and updates |
 
 **Stale data example:** User searches `jacket` → gets **5 rows** → cached. Admin adds 5 more on backend (**10 rows**). Within 5 min, user searches `jacket` again → **no API call** → UI still shows **5 rows**. After `staleTime` expires, next search refetches and shows 10 rows.
 
@@ -450,24 +516,24 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 ### Day 1 — Progress snapshot (11–12 June 2026)
 
 ```
-Fundamentals (useQuery, cache, keys)      █████████████████░░░  ~85%
-Practical patterns (debounce, search)     ████████████████░░░░  ~75%
-Theory (server state, staleTime, gcTime)    ████████████████████  ~95%
-Mutations & sync (useMutation, invalidate) ████████████░░░░░░░░  ~60%
+Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~85%
+Practical patterns (debounce, search)      ████████████████░░░░  ~75%
+Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
+Mutations & sync (useMutation, invalidate)   ████████████░░░░░░░░  ~60%
+DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
 Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░░░░░░░░░  ~0%
 ```
 
-**Solid foundation for reading and writing server data.** Next: DevTools and query tuning.
+**Solid foundation for reading, writing, and debugging server data.** Next: `enabled` and global query options.
 
 ---
 
 ## 📅 Day 2 — In progress (12 June 2026)
 
-> Pick up here. Day 1 covered mutations; remaining topics make React Query easier to debug and production-ready.
+> Pick up here. Day 1 covered mutations and DevTools; remaining topics tune query behavior for production.
 
 ### Priority checklist
 
-- [ ] **React Query DevTools** — install `@tanstack/react-query-devtools`, visualize cache live
 - [ ] **`enabled`** — only fetch when condition is met (e.g. `search.length > 2`)
 - [ ] **Global `defaultOptions`** — set `staleTime` / `gcTime` once in `QueryClient` instead of per query
 - [ ] **Fix `staleTime` multiplier** — use `1000 * 60 * 5`, not `10000 * 60 * 5` (currently ~50 min, not 5 min)
@@ -482,19 +548,19 @@ Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░�
 
 ### Suggested order for Day 2
 
-1. Install DevTools and watch cache update when adding a product
-2. Try `enabled` on the products query
-3. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
+1. Try `enabled` on the products query
+2. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
+3. Fix `staleTime` multiplier (`1000` not `10000`)
 4. (Stretch) optimistic updates or infinite query
 
 ### Target after Day 2
 
 | Area | Now (12 Jun) | Target |
 |------|--------------|--------|
-| Overall React Query | ~48% | ~55% |
-| Core fundamentals | ~78% | ~85% |
+| Overall React Query | ~52% | ~58% |
+| Core fundamentals | ~82% | ~88% |
 | Mutations & sync | ~60% | ~70% |
-| DevTools & tuning | ~0% | ~50% |
+| Query tuning (`enabled`, defaults) | ~0% | ~50% |
 
 ### Topics still for later (beyond Day 2)
 
@@ -512,5 +578,5 @@ Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░�
 ---
 
 ## Tech Stack
-- **Frontend:** React 19, Vite, Axios, TanStack React Query v5
+- **Frontend:** React 19, Vite, Axios, TanStack React Query v5, React Query DevTools
 - **Backend:** Express 5, Node.js
