@@ -136,29 +136,65 @@ gcTime: 1000 * 60 * 10,    // 10 minutes
 
 | | `staleTime` | `gcTime` |
 |---|-------------|----------|
-| **Controls** | Is data still trustworthy? | Should we keep it in memory? |
-| **While fresh / active** | No refetch needed | Cache stays available |
-| **When expired** | Data goes stale → may refetch | Unused cache is deleted |
+| **Question it answers** | Can I trust this cache without refetching? | How long do I keep **unused** cache in memory? |
+| **While fresh** | No API call — serve cache (**Fresh**) | (query may be active or inactive) |
+| **When expired** | Data marked **stale** — still in memory | Timer runs only when query is **inactive** |
+| **Then what?** | Refetch only when **stale + trigger** | After timer → cache **deleted forever** |
 
-- **`staleTime`** — *"Should I refetch?"* Data is **fresh** for X time → no API call. After that, data is **stale** but can still sit in memory.
-- **`gcTime`** — *"Should I delete this from memory?"* After you **leave** a query (no component using it), unused cache is kept for X time, then **removed**.
+- **`staleTime`** — *"Should I refetch?"* For 5 min, data is **fresh** → no API call on revisit. After 5 min → **stale** (outdated, not trusted) but **still shown from memory** until a refetch completes.
+- **`gcTime`** — *"Should I delete this from memory?"* Timer starts only when **no component uses that `queryKey`** (query becomes **Inactive**). After 10 min unused → entry removed. Next same search = full fetch like the first time.
 
 **Why both?** They do different jobs — `staleTime` does NOT replace `gcTime`.
 
-| | `staleTime` | `gcTime` |
-|---|-------------|----------|
-| Controls | Freshness (trust data or refetch) | Memory cleanup |
-| When it matters | Query is used or revisited | Query is **unused** |
-| When expired | May refetch (old cache can still show first) | Cache **deleted** from memory |
+**Major tweak — `gcTime` is NOT what keeps stale data in memory:**
+- Stale data stays in memory simply because React Query hasn't deleted it yet.
+- **`gcTime` only counts down when the query is Inactive** (zero observers).
+- If you **stay on the same search** for 2 hours, that cache entry stays in memory the whole time (even if stale) — `gcTime` does **not** wipe it while the query is **active**.
 
-**Example** (`staleTime: 5 min`, `gcTime: 10 min`):
+```
+ACTIVE query ['products', 'mens']  →  stays in memory (fresh OR stale)
+                                   →  gcTime timer NOT running
+
+Switch to ['products', '']         →  'mens' becomes INACTIVE
+                                   →  gcTime 10 min timer STARTS
+                                   →  after 10 min → deleted from memory
+```
+
+**Full lifecycle** (`staleTime: 5 min`, `gcTime: 10 min`):
+
+```
+FETCH → cache → FRESH (0–5 min) → no API on revisit, show cache
+
+5 min → STALE (still in memory, UI still shows old data)
+      → NO automatic refetch — only when stale + TRIGGER
+
+Triggers (mostly automatic, not only "manual"):
+  • Search same term again (query active + stale)
+  • Tab focus (refetchOnWindowFocus)
+  • invalidateQueries (after add product)
+  • Network reconnect
+  • DevTools refetch button (manual)
+  • F5 hard reload → entire cache cleared → brand-new fetch (not a "stale refetch")
+
+STALE + trigger → REFETCH → FRESH again
+
+Leave search "mens" → INACTIVE → gcTime 10 min starts
+  • While inactive: no API calls just for sitting in cache
+  • Revisit before gcTime + still fresh → no API call
+  • Revisit before gcTime + stale → refetch
+After gcTime → DELETED → same search = new full fetch
+```
+
+**Example walkthrough:**
 1. Search `jacket` → `mens` → `jacket` within 5 min → no API call (still fresh)
-2. Search `jacket` after 7 min → stale → refetches, but old rows may show first from cache
-3. Never search `jacket` for 10+ min → cache removed → next `jacket` search = full load like first time
+2. Search `jacket` after 7 min → stale → refetch on trigger (revisit / tab focus), old rows may show first
+3. Search `mens`, then clear search → `mens` inactive; after 10 min unused → cache gone → next `mens` = full load
 
 Without `gcTime`, every old search (`jacket`, `mens`, `ssd`…) would stay in memory forever.
 
 **Note:** Use `1000` (ms), not `10000`.
+
+**One-line summary:** `staleTime` = trust cache. **Stale** = don't trust, refetch on triggers. **`gcTime`** = how long **unused** cache survives before deletion.
 
 ### Step 7 — Debounced search
 Typing `j-a-c-k-e-t` without debounce = 6+ API calls.  
@@ -288,45 +324,7 @@ DevTools are a **debug window** into the in-memory cache — they don't change a
 | **Inactive** | Cached but no component using this `queryKey` | Search `mens` then switch to `''` — old keys stay in cache |
 | **Paused** | Fetch blocked (usually offline) | DevTools offline toggle → search new term |
 
-**Inactive + `gcTime` (important):**
-
-When you leave a search (e.g. `mens` → clear search), `['products', 'mens']` becomes **Inactive**:
-- Data **stays in memory** until `gcTime` expires (~10 min in our app)
-- **No API calls** happen just because it's sitting there inactive
-- If you search `mens` again **before** `gcTime`:
-  - Still **fresh** → **no API call** (instant from cache)
-  - **Stale** → shows cache first, then refetches
-- After `gcTime` with no observers → cache **deleted** → next `mens` = full fetch like first time
-
-```
-Search "mens" → API call → cached
-Clear search  → ["products","mens"] becomes INACTIVE (still in memory)
-Within gcTime → revisit "mens" → may serve cache with no API call (if fresh)
-After gcTime  → cache removed → revisit "mens" → new API call
-```
-
-**Stale ≠ automatic refetch when time expires**
-
-After `staleTime`, React Query marks data **stale** ("might be old") — it does **not** immediately refetch in the background.
-
-A refetch happens when data is **stale** + a **trigger** fires:
-
-| Trigger | Example |
-|---------|---------|
-| Query becomes active again | Search the same term again |
-| Window focus | Switch tabs and come back (`refetchOnWindowFocus`) |
-| Network reconnects | Wi‑Fi drops and returns |
-| `invalidateQueries` | After adding a product |
-| Manual refetch | DevTools refetch button |
-
-Hard refresh (F5) clears the in-memory cache entirely → brand-new fetch (not really a "stale refetch").
-
-```
-0 min  → fetch → FRESH
-5 min  → staleTime expires → STALE (still in memory, UI still shows data)
-       → no refetch yet until a trigger fires
-User searches again / refocuses tab → STALE + trigger → REFETCH → FRESH
-```
+**DevTools ties to Step 6:** Use the panel to watch **Fresh → Fetching → Stale → Inactive** in real time. See [Step 6](#step-6--caching-staletime--gctime) for the full `staleTime` / `gcTime` / trigger mental model.
 
 ### What is Server State Management?
 
@@ -487,14 +485,31 @@ That's why it's a **server-state** library — it manages the **lifecycle of dat
 ### Client-side cache — NOT server-side
 `staleTime` / `gcTime` cache data in the **user's browser** (React Query memory). The backend does not know about it. This is **not** Redis/CDN/server caching.
 
+### Master checklist — is your `staleTime` / `gcTime` concept clear?
+
+Use this to sanity-check your understanding (validated in session):
+
+| Statement | True? |
+|-----------|-------|
+| Within **5 min `staleTime`** → no API call, show cache | ✅ Yes |
+| After **`staleTime`** → data is **stale** (outdated) but **still in memory** | ✅ Yes |
+| **`gcTime` keeps stale data in memory** | ❌ No — stale data stays until deleted; `gcTime` only cleans **inactive** entries |
+| **`gcTime` timer runs while query is active** | ❌ No — timer starts only when query is **Inactive** (no observers) |
+| **Refetch after stale = only manual actions** | ❌ No — many triggers are **automatic** (tab focus, revisit search, `invalidateQueries`) |
+| **F5 hard reload** | Clears entire cache → new fetch (not the same as "stale refetch") |
+| **After `gcTime` on inactive query** → cache deleted → same search = full new fetch | ✅ Yes |
+| **Inactive cache** → no API calls while just sitting unused | ✅ Yes |
+| **Revisit inactive + fresh + within `gcTime`** → no API call | ✅ Yes |
+
 ### Same query + `staleTime` behavior
 For the **same** `queryKey` (e.g. `['products', 'jacket']`):
 
 | When | What happens |
 |------|----------------|
 | Within `staleTime` | No API call — UI uses cached data (**Fresh**) |
-| After `staleTime` | Data marked **stale** — still in memory; refetch only when a **trigger** fires (revisit search, tab focus, invalidate, etc.) |
+| After `staleTime` (still active) | **Stale** — still in memory; no refetch until a **trigger** |
 | Revisit while stale | Often shows old cache first, then refetches and updates |
+| Query inactive + past `gcTime` | Cache **gone** — next visit = fetch like first time |
 
 **Stale data example:** User searches `jacket` → gets **5 rows** → cached. Admin adds 5 more on backend (**10 rows**). Within 5 min, user searches `jacket` again → **no API call** → UI still shows **5 rows**. After `staleTime` expires, next search refetches and shows 10 rows.
 
