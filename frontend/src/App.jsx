@@ -1,6 +1,6 @@
 // ************************ React Query *********************** 
 import { useState, useEffect } from 'react'
-import { useQuery,keepPreviousData } from '@tanstack/react-query'
+import { useQuery,keepPreviousData,useMutation,useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 
 function App() {
@@ -26,6 +26,33 @@ function App() {
     gcTime: 10000*60*10, //After you leave a search, its cache stays in memory for 10 min
   })
 
+  const [name, setName] = useState('')
+  const [price, setPrice] = useState('')
+  const [image, setImage] = useState('')
+
+  const queryClient = useQueryClient()
+
+  const addProductMutation = useMutation({
+    mutationFn: (newProduct) =>
+      axios.post('/api/products', newProduct).then((res) => res.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] }) //invalidate the query to get the latest data
+      setName('')
+      setPrice('')
+      setImage('')
+    }
+  })
+
+  const handleAddProduct = (e) => {
+    e.preventDefault()
+  
+    addProductMutation.mutate({
+      name,
+      price: Number(price),
+      image,
+    })
+  }
+
   if (isLoading) {
     return <h1>Loading...</h1>
   }
@@ -37,6 +64,34 @@ function App() {
   return (
     <>
       <h1>Hello World</h1>
+       <form onSubmit={handleAddProduct}>
+        <h2>Add Product</h2>
+        <input
+          type="text"
+          placeholder="Product name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          type="number"
+          placeholder="Price"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <input
+          type="text"
+          placeholder="Image URL"
+          value={image}
+          onChange={(e) => setImage(e.target.value)}
+        />
+        <button type="submit" disabled={addProductMutation.isPending}>
+          {addProductMutation.isPending ? 'Adding...' : 'Add Product'}
+        </button>
+
+        {addProductMutation.isError && <p>Failed to add product</p>}
+        {addProductMutation.isSuccess && <p>Product added successfully!</p>}
+       </form>
+  
       <input type="text" placeholder="Search products" value={search} onChange={(e) => setSearch(e.target.value)} />
 
       {search !== debouncedSearch && <p>Waiting for you to stop typing...</p>}

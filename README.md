@@ -1,7 +1,7 @@
 # React Query — Learning Project
 
-A full-stack practice app for learning **TanStack React Query** (`@tanstack/react-query`) — a **server-state management** library for fetching, caching, and syncing API data in React.  
-Backend serves 20 dummy products; frontend fetches, searches, caches, and debounces requests.
+A full-stack practice app for learning **TanStack React Query** (`@tanstack/react-query`) — a **server-state management** library for fetching, caching, syncing, and mutating API data in React.  
+Backend serves dummy products (in-memory); frontend fetches, searches, caches, debounces, and adds products via mutations.
 
 ---
 
@@ -10,11 +10,11 @@ Backend serves 20 dummy products; frontend fetches, searches, caches, and deboun
 ```
 react-query/
 ├── backend/          # Express API (port 3000)
-│   └── index.js      # GET /api/products + optional ?search=
+│   └── index.js      # GET /api/products + POST /api/products + optional ?search=
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider setup
-        └── App.jsx   # useQuery + search + debounce
+        └── App.jsx   # useQuery + useMutation + search + debounce
 ```
 
 ---
@@ -43,24 +43,27 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11 June 2026** | `useQuery`, caching, debounce, server state theory | **~38% overall** / **~65% fundamentals** | ✅ Done |
-| **12 June 2026** | Mutations, DevTools, advanced patterns | Target: **~50% overall** / **~80% fundamentals** | 📋 Planned |
+| **11–12 June 2026** | `useQuery`, caching, debounce, `useMutation`, `invalidateQueries` | **~48% overall** / **~78% fundamentals** | ✅ Day 1 done |
+| **12 June 2026** | DevTools, `enabled`, global options, advanced patterns | Target: **~55% overall** / **~85% fundamentals** | 📋 Day 2 in progress |
 
-**Quick jump:** [11 June 2026](#-11-june-2026--day-1-completed) · [12 June 2026](#-12-june-2026--day-2-planned)
+**Quick jump:** [Day 1 (completed)](#-day-1--completed-11–12-june-2026) · [Day 2 (remaining)](#-day-2--in-progress-12-june-2026)
 
 ---
 
-## 📅 11 June 2026 — Day 1 (Completed)
+## 📅 Day 1 — Completed (11–12 June 2026)
 
-> First session. Built the app, replaced manual `useEffect` fetching with React Query, and learned caching deeply.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, then added **mutations** and **cache invalidation** so the UI stays in sync after writes.
 
 ### What We Built
 
 ### Backend
-- Express server with `GET /api/products`
-- 20 real product names, prices, and images from [fakestoreapi.com](https://fakestoreapi.com)
+- Express server with `GET /api/products` and `POST /api/products`
+- Product names, prices, and images from [fakestoreapi.com](https://fakestoreapi.com) style data
+- Shared in-memory `products` array (module-level) — both GET and POST read/write the same list
+- `express.json()` middleware to parse POST request bodies
 - Optional search filter: `/api/products?search=jacket`
-- 3 second artificial delay (`setTimeout`) to simulate slow API
+- 3 second artificial delay on full list (`setTimeout`) to simulate slow API
+- POST validates `name`, `price`, `image`; returns `201` with new product (`id` via `Date.now()`)
 
 ### Frontend (before React Query)
 We started with the manual approach:
@@ -173,6 +176,93 @@ useEffect(() => {
 queryKey: ['products', debouncedSearch]
 ```
 
+### Step 8 — `POST /api/products` (backend write endpoint)
+
+Mutations need a real API endpoint that **changes** server data. Added:
+
+```js
+app.use(express.json())
+
+let products = [ /* shared array — outside route handlers */ ]
+
+app.post("/api/products", (req, res) => {
+  const { name, price, image } = req.body
+  // validate → build newProduct → products.push(newProduct) → res.status(201).json(newProduct)
+})
+```
+
+**Key idea:** The `products` array must live **outside** `GET` and `POST` so both routes share the same data. If it stays inside `GET` only, `POST` cannot push to it.
+
+### Step 9 — `useMutation` + Add Product form
+
+| Hook | Purpose | When it runs |
+|------|---------|--------------|
+| `useQuery` | **Read** server data | Automatically on mount / when `queryKey` changes |
+| `useMutation` | **Write** server data | Only when **you** call `mutate()` (e.g. form submit) |
+
+```jsx
+const addProductMutation = useMutation({
+  mutationFn: (newProduct) =>
+    axios.post('/api/products', newProduct).then((res) => res.data),
+})
+
+// on submit:
+addProductMutation.mutate({ name, price: Number(price), image })
+```
+
+**Mutation UI states:**
+
+| State | Meaning |
+|-------|---------|
+| `isPending` | POST in flight — disable button, show "Adding..." |
+| `isSuccess` | POST succeeded |
+| `isError` | POST failed (e.g. missing fields → 400) |
+
+Form fields (`name`, `price`, `image`) are **client state** (`useState`). The product list remains **server state** (`useQuery`).
+
+### Step 10 — `invalidateQueries` (sync cache after mutation)
+
+**Problem we hit:** Backend changed (fewer products, or new product added) but UI still showed old count — React Query was serving **cached** data within `staleTime`. `useMutation` alone does **not** refresh the list.
+
+**Fix:** After a successful POST, tell React Query the products cache is outdated:
+
+```jsx
+const queryClient = useQueryClient()
+
+const addProductMutation = useMutation({
+  mutationFn: (newProduct) =>
+    axios.post('/api/products', newProduct).then((res) => res.data),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['products'] })
+    setName('')
+    setPrice('')
+    setImage('')
+  },
+})
+```
+
+**What `invalidateQueries` does:**
+1. Marks all queries whose key **starts with** `['products']` as stale (`['products', '']`, `['products', 'jacket']`, etc.)
+2. Refetches active queries from the API
+3. Updates cache and re-renders components
+
+**Flow after add product:**
+
+```
+User submits form → POST /api/products → backend pushes to array
+       → onSuccess → invalidateQueries(['products'])
+       → GET /api/products refetches → UI shows new count + product
+```
+
+Even with a long `staleTime`, **invalidate forces a refetch** because we know the server changed.
+
+| Approach | When to use |
+|----------|-------------|
+| Lower `staleTime` | Data changes often; ok refetching on revisit |
+| `invalidateQueries` | **You know** data changed (after create/update/delete) |
+
+Production apps typically use **both**.
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -279,21 +369,9 @@ useQuery({ queryKey: ['user'], queryFn: fetchUser })  // in Profile
 
 One network call, both components stay in sync. Same idea applies if two components both use `queryKey: ['products']`.
 
-### When server data changes (`useMutation` + invalidate)
+### When server data changes (`useMutation` + invalidate) — hands-on ✅
 
-When a user **updates** data (e.g. edit a product), you use `useMutation`. After success:
-
-```jsx
-queryClient.invalidateQueries({ queryKey: ['products'] })
-```
-
-React Query then:
-1. Marks matching cache as **stale**
-2. **Refetches** from the API
-3. **Updates** the cache
-4. **Re-renders** all components using that query
-
-No manual "fetch again and pass data around."
+Implemented in Steps 9–10. After adding a product, `invalidateQueries` refetches the list — no manual "fetch again and pass data around."
 
 ### React Query vs Redux / Zustand
 
@@ -354,9 +432,11 @@ For the **same** `queryKey` (e.g. `['products', 'jacket']`):
 
 **Stale data example:** User searches `jacket` → gets **5 rows** → cached. Admin adds 5 more on backend (**10 rows**). Within 5 min, user searches `jacket` again → **no API call** → UI still shows **5 rows**. After `staleTime` expires, next search refetches and shows 10 rows.
 
+**We saw this live:** Editing the backend product list did not update the UI until hard refresh — the cache still held the old 20 products. Same root cause.
+
 This is the **tradeoff**: better performance vs possibly outdated UI. Fix options:
 - Shorter `staleTime` for data that changes often (e.g. `1000 * 30` = 30 sec)
-- `queryClient.invalidateQueries({ queryKey: ['products'] })` after admin updates
+- `queryClient.invalidateQueries({ queryKey: ['products'] })` after mutations ✅ (Step 10)
 
 ### What React Query replaced
 | Manual (`useEffect`) | React Query |
@@ -365,32 +445,32 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 | `useEffect` for fetching | `useQuery` |
 | `AbortController` cleanup | Built-in cancellation |
 | No cache | Automatic per-`queryKey` cache |
+| Manual POST + refetch list | `useMutation` + `invalidateQueries` |
 
-### Day 1 — Progress snapshot (11 June 2026)
+### Day 1 — Progress snapshot (11–12 June 2026)
 
 ```
-Fundamentals (useQuery, cache, keys)      ████████████████░░░░  ~80%
-Practical patterns (debounce, search)     ██████████████░░░░░░  ~70%
-Theory (server state, staleTime, gcTime)  ████████████████████  ~95%
-Mutations & sync                          ██░░░░░░░░░░░░░░░░░░  ~10%
-Advanced (infinite, optimistic, suspense) ░░░░░░░░░░░░░░░░░░░░  ~0%
+Fundamentals (useQuery, cache, keys)      █████████████████░░░  ~85%
+Practical patterns (debounce, search)     ████████████████░░░░  ~75%
+Theory (server state, staleTime, gcTime)    ████████████████████  ~95%
+Mutations & sync (useMutation, invalidate) ████████████░░░░░░░░  ~60%
+Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░░░░░░░░░  ~0%
 ```
 
-**Solid foundation for reading/fetching data.** Biggest gap: writing/updating data (`useMutation`).
+**Solid foundation for reading and writing server data.** Next: DevTools and query tuning.
 
 ---
 
-## 📅 12 June 2026 — Day 2 (Planned)
+## 📅 Day 2 — In progress (12 June 2026)
 
-> Pick up here after a break. Goal: learn **mutations** and tools that make React Query production-ready.
+> Pick up here. Day 1 covered mutations; remaining topics make React Query easier to debug and production-ready.
 
 ### Priority checklist
 
-- [ ] **`useMutation`** — POST / PUT / DELETE (e.g. add a product on backend + form in UI)
-- [ ] **`invalidateQueries`** (hands-on) — after mutation success, refetch products list automatically
 - [ ] **React Query DevTools** — install `@tanstack/react-query-devtools`, visualize cache live
 - [ ] **`enabled`** — only fetch when condition is met (e.g. `search.length > 2`)
 - [ ] **Global `defaultOptions`** — set `staleTime` / `gcTime` once in `QueryClient` instead of per query
+- [ ] **Fix `staleTime` multiplier** — use `1000 * 60 * 5`, not `10000 * 60 * 5` (currently ~50 min, not 5 min)
 
 ### Stretch goals (if time allows)
 
@@ -402,21 +482,21 @@ Advanced (infinite, optimistic, suspense) ░░░░░░░░░░░░�
 
 ### Suggested order for Day 2
 
-1. Add `POST /api/products` on backend
-2. Build "Add Product" form with `useMutation`
-3. Call `queryClient.invalidateQueries({ queryKey: ['products'] })` on success
-4. Install DevTools and watch cache update in real time
-5. Try `enabled` or global `defaultOptions`
+1. Install DevTools and watch cache update when adding a product
+2. Try `enabled` on the products query
+3. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
+4. (Stretch) optimistic updates or infinite query
 
 ### Target after Day 2
 
-| Area | Now (11 Jun) | Target (12 Jun) |
-|------|--------------|-----------------|
-| Overall React Query | ~38% | ~50% |
-| Core fundamentals | ~65% | ~80% |
-| Mutations & sync | ~10% | ~60% |
+| Area | Now (12 Jun) | Target |
+|------|--------------|--------|
+| Overall React Query | ~48% | ~55% |
+| Core fundamentals | ~78% | ~85% |
+| Mutations & sync | ~60% | ~70% |
+| DevTools & tuning | ~0% | ~50% |
 
-### Topics still for later (beyond 12 June)
+### Topics still for later (beyond Day 2)
 
 - Parallel queries / dependent queries
 - `setQueryData` (manual cache updates)
