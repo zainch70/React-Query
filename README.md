@@ -515,6 +515,35 @@ res.json({ products: pageProducts, nextPage, total: products.length })
 - **Search** (`?search=mens`) — still returns a plain array (unchanged)
 - **POST** — `products.unshift(newProduct)` so new items appear on page 1
 
+#### Before pagination vs after (API shape)
+
+**Before pagination** — one request returned **all products** as a flat array:
+
+```json
+[ { "id": 1, ... }, { "id": 2, ... }, { "id": 3, ... }, { "id": 4, ... } ]
+```
+
+Frontend `useQuery` cache: `data = [ p1, p2, p3, p4 ]`
+
+**After pagination** (`limit = 2`) — each request returns **one slice** wrapped in an object:
+
+| Page | URL | `start` | Slice | Products (indices) |
+|------|-----|---------|-------|---------------------|
+| 1 | `?page=1&limit=2` | 0 | `[0:2]` | index 0, 1 |
+| 2 | `?page=2&limit=2` | 2 | `[2:4]` | index 2, 3 |
+
+Page 1 response:
+```json
+{ "products": [p1, p2], "nextPage": 2, "total": 4 }
+```
+
+Page 2 response:
+```json
+{ "products": [p3, p4], "nextPage": undefined, "total": 4 }
+```
+
+Same 4 products on the server — just fetched in **chunks** instead of all at once.
+
 #### Frontend — two hooks (rules of hooks: always call both)
 
 | Mode | Hook | `enabled` when |
@@ -536,11 +565,38 @@ useInfiniteQuery({
 ```
 
 **Flatten pages for UI:**
+
+The grid needs **one flat list** — but `useInfiniteQuery` stores **many page objects**. This line picks the right source:
+
 ```jsx
+const isSearching = debouncedSearch.length > 2
+
 const products = isSearching
-  ? searchData ?? []
-  : infiniteData?.pages.flatMap((page) => page.products) ?? []
+  ? searchData ?? []                                    // search → flat array from useQuery
+  : infiniteData?.pages.flatMap((page) => page.products) ?? []  // browse → merge loaded pages
 ```
+
+| Branch | When | Source | Shape |
+|--------|------|--------|-------|
+| `searchData` | `debouncedSearch` has 3+ chars | `useQuery` | `[ p1, p2, ... ]` |
+| `flatMap` | empty or short search | `useInfiniteQuery` | merge `pages[].products` |
+
+**How `flatMap` works** (4 products, 2 per page, both pages loaded):
+
+```
+infiniteData.pages = [
+  { products: [p1, p2], nextPage: 2, total: 4 },           // page 1
+  { products: [p3, p4], nextPage: undefined, total: 4 }    // page 2
+]
+
+pages.flatMap((page) => page.products)
+  page 1 → [p1, p2]
+  page 2 → [p3, p4]
+  merged → [p1, p2, p3, p4]   ← this is what the grid maps over
+```
+
+- `?? []` — if data is still `undefined` (loading), use empty array so `.map()` doesn't crash
+- `totalOnServer` comes from `pages[0].total` (server-wide count, not `products.length`)
 
 **Load more:**
 ```jsx
@@ -574,12 +630,25 @@ const products = isSearching
 1. **Optimistic prepend** on page 1, keep page size: `[newProduct, ...page.products].slice(0, PAGE_LIMIT)` — count stays **2**
 2. **`onSuccess`** — swap `tempId` for real `createdProduct` via `setQueryData` (no `invalidateQueries` for infinite)
 3. **Remove `onSettled` invalidate** for infinite path — it caused the refetch flash
+4. **Bump `total` in `onMutate`** — optimistic update patches `products` but not `total` by default; without `total: (page.total ?? 0) + 1`, UI showed `Showing 2 of 4` instead of `Showing 2 of 5` until manual refresh
 
 ```jsx
 onMutate: async (newProduct) => {
   if (debouncedSearch === '') {
     const tempId = Date.now()
-    // prepend to page 1, slice to PAGE_LIMIT
+    // prepend to page 1, slice to PAGE_LIMIT, increment total
+    queryClient.setQueryData(queryKey, (old) => ({
+      ...old,
+      pages: old.pages.map((page, index) =>
+        index === 0
+          ? {
+              ...page,
+              total: (page.total ?? 0) + 1,
+              products: [{ id: tempId, ...newProduct }, ...page.products].slice(0, PAGE_LIMIT),
+            }
+          : page
+      ),
+    }))
     return { previousData, queryKey, tempId }
   }
   // search path: append to array cache
@@ -600,8 +669,9 @@ onSuccess: (createdProduct, _variables, context) => {
 **How we tested:**
 1. Empty search → 2 products load → **Load more** → 2 more
 2. Add product → count stays **2**, new product on **top** (no 3→2 flash)
-3. Search `mens` → normal `useQuery` list, no Load more
-4. Force POST `400` → rollback still works
+3. Add product → `Showing 2 of 5` updates immediately (total bumped in cache)
+4. Search `mens` → normal `useQuery` list, no Load more
+5. Force POST `400` → rollback still works
 
 **Mental model:**
 ```

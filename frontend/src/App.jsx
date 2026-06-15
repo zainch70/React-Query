@@ -73,6 +73,7 @@ function App() {
   const products = isSearching
   ? searchData ?? []
   : infiniteData?.pages.flatMap((page) => page.products) ?? []
+
   //total number of products on the server
   const totalOnServer = infiniteData?.pages?.[0]?.total
   const loadedCount = products.length
