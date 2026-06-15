@@ -14,7 +14,7 @@ react-query/
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + React Query DevTools
-        └── App.jsx   # useQuery + useMutation + search + debounce
+        └── App.jsx   # useQuery + useMutation + search + debounce + enabled
 ```
 
 ---
@@ -43,16 +43,15 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–12 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, cache states | **~52% overall** / **~82% fundamentals** | ✅ Day 1 done |
-| **12 June 2026** | `enabled`, global options, advanced patterns | Target: **~58% overall** / **~88% fundamentals** | 📋 Day 2 in progress |
+| **11–15 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, `enabled` | **~55% overall** / **~85% fundamentals** | ✅ Learned |
 
-**Quick jump:** [Day 1 (completed)](#-day-1--completed-11–12-june-2026) · [Day 2 (remaining)](#-day-2--in-progress-12-june-2026)
+**Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
 ---
 
-## 📅 Day 1 — Completed (11–12 June 2026)
+## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, then used **DevTools** to visualize Fresh / Stale / Inactive / Fetching / Paused cache states.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, and added **`enabled`** for conditional fetching.
 
 ### What We Built
 
@@ -326,6 +325,59 @@ DevTools are a **debug window** into the in-memory cache — they don't change a
 
 **DevTools ties to Step 6:** Use the panel to watch **Fresh → Fetching → Stale → Inactive** in real time. See [Step 6](#step-6--caching-staletime--gctime) for the full `staleTime` / `gcTime` / trigger mental model.
 
+### Step 12 — `enabled` (conditional fetching)
+
+**Problem:** Debounce reduces calls while typing, but a 2-character search like `me` still hits the API after the user stops typing — often too early and wasteful.
+
+**Fix:** `enabled` tells React Query **whether to run** `queryFn` at all.
+
+```jsx
+enabled: debouncedSearch.length === 0 || debouncedSearch.length > 2,
+```
+
+| `debouncedSearch` | `enabled` | What happens |
+|-------------------|-----------|--------------|
+| `''` (empty) | `true` | Fetch full product list (initial load) |
+| `'me'` (1–2 chars) | `false` | **No API call** — query is idle |
+| `'men'` (3+ chars) | `true` | Fetch `/api/products?search=men` |
+
+**Key idea:** `enabled: false` ≠ loading. The query is **paused** — `isFetching` stays `false`, and `data` can be `undefined` for that `queryKey`.
+
+**UI changes required:**
+- `isSearchTooShort` — detect 1–2 character searches and show *"Type at least 3 characters to search"*
+- Safe rendering — `data?.length` and `data?.map` so the app doesn't crash when `enabled` is `false`
+- Hide product list while search is too short (`!isSearchTooShort`)
+
+```jsx
+const isSearchTooShort = debouncedSearch.length > 0 && debouncedSearch.length <= 2
+
+{isSearchTooShort && <p>Type at least 3 characters to search</p>}
+
+{!isSearchTooShort && (
+  <>
+    <h2>number of products: {data?.length ?? 0}</h2>
+    {data?.map((product) => ( ... ))}
+  </>
+)}
+```
+
+**How we tested:**
+1. Empty search → full list loads (3s delay)
+2. Type `me` → no fetch after debounce; short-search message shows
+3. Type `men` → fetch runs; filtered products appear
+4. DevTools → no request for `['products', 'me']`; request for `['products', 'men']`
+
+**`enabled` vs debounce:**
+
+| Tool | Job |
+|------|-----|
+| **Debounce** | Wait until user **stops typing** before updating `debouncedSearch` |
+| **`enabled`** | Decide **if** a fetch should run for the current `debouncedSearch` |
+
+Use both together: debounce avoids rapid key changes; `enabled` blocks fetches that aren't meaningful yet.
+
+**Also fixed in Step 6:** `staleTime` / `gcTime` multiplier — use `1000 * 60 * 5` (5 min), not `10000 * 60 * 5` (~50 min). Same for `gcTime`: `1000 * 60 * 10` = 10 min.
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -528,30 +580,29 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 | No cache | Automatic per-`queryKey` cache |
 | Manual POST + refetch list | `useMutation` + `invalidateQueries` |
 
-### Day 1 — Progress snapshot (11–12 June 2026)
+### Progress snapshot (learned)
 
 ```
-Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~85%
-Practical patterns (debounce, search)      ████████████████░░░░  ~75%
+Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~88%
+Practical patterns (debounce, search)      █████████████████░░░  ~85%
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
-Mutations & sync (useMutation, invalidate)   ████████████░░░░░░░░  ~60%
+Mutations & sync (useMutation, invalidate) ████████████░░░░░░░░  ~60%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
+Query tuning (enabled)                     ██████████░░░░░░░░░░  ~50%
 Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░░░░░░░░░  ~0%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next: `enabled` and global query options.
+**Solid foundation for reading, writing, and debugging server data.** Next up: global `defaultOptions` and advanced patterns (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
-## 📅 Day 2 — In progress (12 June 2026)
+## 📋 Not learned yet
 
-> Pick up here. Day 1 covered mutations and DevTools; remaining topics tune query behavior for production.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through `enabled`; below is what’s still ahead — production tuning and advanced patterns.
 
 ### Priority checklist
 
-- [ ] **`enabled`** — only fetch when condition is met (e.g. `search.length > 2`)
 - [ ] **Global `defaultOptions`** — set `staleTime` / `gcTime` once in `QueryClient` instead of per query
-- [ ] **Fix `staleTime` multiplier** — use `1000 * 60 * 5`, not `10000 * 60 * 5` (currently ~50 min, not 5 min)
 
 ### Stretch goals (if time allows)
 
@@ -561,23 +612,21 @@ Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░�
 - [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
 - [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
 
-### Suggested order for Day 2
+### Suggested learning order
 
-1. Try `enabled` on the products query
-2. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
-3. Fix `staleTime` multiplier (`1000` not `10000`)
-4. (Stretch) optimistic updates or infinite query
+1. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
+2. (Stretch) optimistic updates or infinite query
 
-### Target after Day 2
+### Targets (when you learn this)
 
-| Area | Now (12 Jun) | Target |
-|------|--------------|--------|
-| Overall React Query | ~52% | ~58% |
-| Core fundamentals | ~82% | ~88% |
+| Area | Now | Target |
+|------|-----|--------|
+| Overall React Query | ~55% | ~58% |
+| Core fundamentals | ~85% | ~88% |
 | Mutations & sync | ~60% | ~70% |
-| Query tuning (`enabled`, defaults) | ~0% | ~50% |
+| Query tuning (defaults, prefetch) | ~25% | ~75% |
 
-### Topics still for later (beyond Day 2)
+### Topics for later (beyond this section)
 
 - Parallel queries / dependent queries
 - `setQueryData` (manual cache updates)

@@ -21,9 +21,10 @@ function App() {
     // queryKey: ['products', search], //when search changes, React Query treats it as a new query and refetches.No useEffect or AbortController — React Query cancels the old request when the key changes.
     queryFn: () => axios.get(`/api/products?search=${debouncedSearch}`).then((res) => res.data),
     // queryFn: () => axios.get(`/api/products?search=${search}`).then((res) => res.data),
+    enabled:debouncedSearch.length === 0 || debouncedSearch.length > 2, //only fetch data when search is more than 2 characters
     placeholderData: keepPreviousData, //keep the previous data when the new data is loading
-    staleTime: 10000*60*5, //React Query won't refetch for 5 minutes and treat cached data as fresh
-    gcTime: 10000*60*10, //After you leave a search, its cache stays in memory for 10 min
+    staleTime: 1000*60*5, //React Query won't refetch for 5 minutes and treat cached data as fresh
+    gcTime: 1000*60*10, //After you leave a search, its cache stays in memory for 10 min
   })
 
   const [name, setName] = useState('')
@@ -56,6 +57,8 @@ function App() {
   if (isLoading) {
     return <h1>Loading...</h1>
   }
+  
+  const isSearchTooShort = debouncedSearch.length > 0 && debouncedSearch.length <= 2
 
   if (isError) {
     return <h1>Error fetching products</h1>
@@ -96,20 +99,26 @@ function App() {
 
       {search !== debouncedSearch && <p>Waiting for you to stop typing...</p>}
 
+      {isSearchTooShort && <p>Type at least 3 characters to search</p>}
+
       {/* show the previous data when the new data is loading */}
       {isFetching && <p>fetching from api...</p>}
 
       {/* show the fresh data when the new data is loading */}
       {!isFetching && !isStale && <p>Served from cache (fresh)</p>}
 
-      <h2>number of products: {data.length}</h2>
-      {data.map((product) => (
-        <div key={product.id}>
-          <h3>{product.name}</h3>
-          <p>{product.price}</p>
-          <img src={product.image} alt={product.name} />
-        </div>
-      ))}
+      {!isSearchTooShort && (
+        <>
+          <h2>number of products: {data?.length ?? 0}</h2>
+          {data?.map((product) => (
+            <div key={product.id}>
+              <h3>{product.name}</h3>
+              <p>{product.price}</p>
+              <img src={product.image} alt={product.name} />
+            </div>
+          ))}
+        </>
+      )}
     </>
   )
 }
