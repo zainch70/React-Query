@@ -10,12 +10,12 @@ Backend serves dummy products (in-memory); frontend fetches, searches, caches, d
 ```
 react-query/
 ├── backend/          # Express API (port 3000)
-│   └── index.js      # GET /api/products (pagination + search + stats) + POST /api/products
+│   └── index.js      # GET /api/products (pagination + search + stats + detail) + POST
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + refetch/retry + DevTools
-        ├── App.jsx   # infinite + search + parallel stats queries + prefetch + mutations
-        └── App.css   # Product store layout + cards + form + store-stats banner
+        ├── App.jsx   # infinite + search + parallel stats + dependent detail queries
+        └── App.css   # layout + cards + store-stats + product-detail panel
 ```
 
 ---
@@ -44,20 +44,20 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–16 June 2026** | Steps 1–18: fundamentals through UI polish · **Step 19:** parallel queries + store stats | **~82% overall** / **~94% fundamentals** | ✅ Learned |
+| **11–16 June 2026** | Steps 1–20: `useQuery` through dependent queries (parallel stats + product detail) | **~90% practical** / **~95% fundamentals** | ✅ Complete |
 
-**Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
+**Quick jump:** [Learned](#-learned) · [Completion summary](#completion-summary)
 
 ---
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, tuned **`refetchOnWindowFocus`** / **`retry`**, polished the **product store UI** with `App.css`, and added **parallel queries** for store stats.
+> **Learning complete (Steps 1–20).** Built a full product store with React Query: fetching, caching, mutations, infinite scroll, prefetch, optimistic updates, parallel stats, and dependent product detail. Ready for real-world server-state work in React apps.
 
 ### What We Built
 
 ### Backend
-- Express server with `GET /api/products`, `GET /api/products/stats`, and `POST /api/products`
+- Express server with `GET /api/products`, `GET /api/products/stats`, `GET /api/products/:id/detail`, and `POST /api/products`
 - Product names, prices, and images from [fakestoreapi.com](https://fakestoreapi.com) style data
 - Shared in-memory `products` array (module-level) — both GET and POST read/write the same list
 - `express.json()` middleware to parse POST request bodies
@@ -970,6 +970,96 @@ useQueries  = dynamic list of parallel queries (for later / many IDs)
 Two useQuery hooks = simplest parallel pattern (what we used)
 ```
 
+### Step 20 — Dependent queries (product detail on click)
+
+**Problem:** Product cards show basic fields (name, price, image). Extra detail (stock, category, description) should load **only when the user picks a product** — not on every page load.
+
+**Fix:** A second `useQuery` with `enabled: selectedProductId != null` — React Query **skips** the fetch until client state provides an id.
+
+**Not the same as Load more:** Pagination uses one `useInfiniteQuery` key and `fetchNextPage()` — same query, next chunk. Dependent queries use a **separate key** and wait for user/state before running.
+
+#### Backend — `GET /api/products/:id/detail`
+
+Place **after** `/api/products/stats`, **before** `GET /api/products`:
+
+```js
+app.get("/api/products/:id/detail", (req, res) => {
+  const id = Number(req.params.id)
+  const product = products.find((p) => p.id === id)
+
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" })
+  }
+
+  setTimeout(() => {
+    res.json({
+      ...product,
+      description: `Full description for ${product.name}.`,
+      stock: Math.floor(Math.random() * 50) + 1,
+      category: product.name.toLowerCase().includes("mens") ? "Mens" : "Accessories",
+    })
+  }, 1000)
+})
+```
+
+#### Frontend — state + dependent `useQuery`
+
+```jsx
+const [selectedProductId, setSelectedProductId] = useState(null)
+
+const {
+  data: productDetail,
+  isLoading: isDetailLoading,
+  isError: isDetailError,
+} = useQuery({
+  queryKey: ['products', 'detail', selectedProductId],
+  queryFn: () =>
+    axios
+      .get(`/api/products/${selectedProductId}/detail`)
+      .then((res) => res.data),
+  enabled: selectedProductId != null, // ← dependent: no id → no fetch
+})
+```
+
+| | Parallel (Step 19) | Dependent (Step 20) |
+|--|-------------------|---------------------|
+| **When** | On page load | After user clicks a card |
+| **`enabled`** | `debouncedSearch === ''` | `selectedProductId != null` |
+| **Keys** | `['products', 'stats']` | `['products', 'detail', id]` |
+| **API** | `/api/products/stats` | `/api/products/:id/detail` |
+
+**Flow:**
+
+```
+Page load     →  no /detail request
+Click card  →  setSelectedProductId(1)
+             →  enabled becomes true
+             →  GET /api/products/1/detail
+Click ✕     →  setSelectedProductId(null)  (panel hides; cache kept)
+Re-click 1  →  instant from cache (within staleTime)
+```
+
+#### UI — clickable cards + `.product-detail` panel
+
+- Product cards: `onClick` sets `selectedProductId`, `.product-card--selected` outline
+- Panel below grid: loading / error / category, stock, price, description
+- Close button clears selection (`selectedProductId = null`)
+
+**How we tested:**
+1. Load page → Network: **no** `/detail` calls
+2. Click product → one `GET /api/products/1/detail` after ~1s
+3. Click different product → new key `['products', 'detail', 2]` fetches
+4. DevTools → detail query **idle** until click, then **fetching**
+5. Close panel → no fetch; re-click same product → served from cache
+
+**Mental model:**
+
+```
+Parallel   = fire multiple queries at once (Step 19)
+Dependent  = query B waits for a value (id) via enabled (Step 20)
+Pagination = same infinite query, fetchNextPage (NOT dependent query pattern)
+```
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -1172,42 +1262,43 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 | No cache | Automatic per-`queryKey` cache |
 | Manual POST + refetch list | `useMutation` + `invalidateQueries` |
 
-### Progress snapshot (learned)
+### Progress snapshot (complete)
 
 ```
-Fundamentals (useQuery, cache, keys)       ██████████████████░░  ~90%
-Practical patterns (debounce, search)      █████████████████░░░  ~85%
+Fundamentals (useQuery, cache, keys)       ███████████████████░  ~95%
+Practical patterns (debounce, search)      ██████████████████░░  ~90%
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
-Mutations & sync (useMutation, invalidate, optimistic) █████████████████░░░  ~80%
-DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
-Query tuning (enabled, defaults, refetch, retry)  █████████████████░░░  ~85%
-Advanced (infinite, prefetch)              ████████████████░░░░  ~50%
-Parallel queries                           ████████████████░░░░  ~80%
+Mutations & sync (useMutation, invalidate, optimistic) ██████████████████░░  ~88%
+DevTools & cache states (fresh/stale/…)    ████████████████░░░░  ~80%
+Query tuning (enabled, defaults, refetch, retry)  ██████████████████░░  ~90%
+Advanced (infinite, prefetch)              ██████████████████░░  ~88%
+Parallel & dependent queries               ██████████████████░░  ~90%
 UI polish (App.css product store)          ████████████████████  ~100%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Optional next: dependent queries, Suspense, or testing (see [Not learned yet](#-not-learned-yet)).
+| Scope | Coverage | Notes |
+|-------|----------|--------|
+| **Practical React Query (this project)** | **~90%** | Steps 1–20 — enough for production app work |
+| **Core fundamentals** | **~95%** | Caching, keys, mutations, tuning well covered |
+| **Full TanStack Query library** | **~90%** | Remaining topics are optional niches (see below) |
+
+**You can confidently:** read/write `useQuery` & `useMutation`, debug cache in DevTools, paginate with `useInfiniteQuery`, prefetch, optimistic updates, and chain parallel/dependent queries.
 
 ---
 
-## 📋 Not learned yet
+## Completion summary
 
-> Pick up here when you're ready. Fundamentals through **parallel queries (Step 19)** are in [Learned](#-learned).
+This README documents **20 learning steps** — the planned curriculum for this project is **finished**.
 
-### Suggested learning order
+| Steps | Topics covered |
+|-------|----------------|
+| 1–11 | Setup, `useQuery`, search, caching, debounce, mutations, invalidate, DevTools |
+| 12–14 | `enabled`, `defaultOptions`, optimistic updates |
+| 15–16 | `useInfiniteQuery`, `prefetchQuery` |
+| 17–18 | Refetch/retry tuning, `App.css` UI polish |
+| 19–20 | Parallel queries (stats), dependent queries (product detail) |
 
-1. Dependent queries (`enabled` waits on another query's data)
-2. Suspense mode with React Query
-3. Testing queries with mock server
-
-### Targets (when you learn this)
-
-| Area | Now | Target |
-|------|-----|--------|
-| Overall React Query | ~82% | ~88% |
-| Core fundamentals | ~94% | ~95% |
-| Mutations & sync | ~80% | ~85% |
-| Advanced (dependent, suspense, testing) | ~55% | ~70% |
+**Not part of this project (optional for later):** Suspense mode (`useSuspenseQuery`), testing with MSW, SSR/hydration, `useQueries` for dynamic lists — useful eventually, not required for day-to-day React Query work.
 
 ---
 

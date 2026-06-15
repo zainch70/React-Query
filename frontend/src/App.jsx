@@ -16,6 +16,7 @@ const productsInfiniteOptions = {
 function App() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [selectedProductId, setSelectedProductId] = useState(null) // Step 20 — drives dependent detail query
 
   useEffect(() => {
     const timeoutId  = setTimeout(() => {
@@ -79,6 +80,20 @@ function App() {
     queryFn: () =>
       axios.get('/api/products/stats').then((res) => res.data),
     enabled: debouncedSearch === '', // same as infinite — browse mode only
+  })
+
+  // Step 20 — dependent query: detail only after user selects a product
+  const {
+    data: productDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+  } = useQuery({
+    queryKey: ['products', 'detail', selectedProductId],
+    queryFn: () =>
+      axios
+        .get(`/api/products/${selectedProductId}/detail`)
+        .then((res) => res.data),
+    enabled: selectedProductId != null,
   })
 
    //flatten the array of arrays into a single array
@@ -362,7 +377,7 @@ function App() {
           ) : null}
         </div>
       )}
-      
+
        {/* --- before Part H+I (plain form) ---
        <form onSubmit={handleAddProduct}>
         <h2>Add Product</h2>
@@ -499,9 +514,30 @@ function App() {
           {products.length === 0 ? (
             <p className="empty-state">No products found</p>
           ) : (
+            <>
+            {/* --- before Step 20 (static card) ---
             <div className="product-grid">
               {products.map((product) => (
-                <article key={product.id} className="product-card">
+                <article key={product.id} className="product-card">...</article>
+              ))}
+            </div>
+            --- end before Step 20 --- */}
+
+            <div className="product-grid">
+              {products.map((product) => (
+                <article
+                  key={product.id}
+                  className={`product-card${selectedProductId === product.id ? ' product-card--selected' : ''}`}
+                  onClick={() => setSelectedProductId(product.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelectedProductId(product.id)
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
                   <div className="product-card__image-wrap">
                     <img
                       className="product-card__image"
@@ -515,6 +551,40 @@ function App() {
                   </div>
                 </article>
               ))}
+            </div>
+            </>
+          )}
+
+          {/* Step 20 — product detail panel (dependent query) */}
+          {selectedProductId != null && (
+            <div className="product-detail">
+              <div className="product-detail__header">
+                <h2>Product detail</h2>
+                <button
+                  type="button"
+                  className="product-detail__close"
+                  onClick={() => setSelectedProductId(null)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {isDetailLoading && (
+                <p className="status status--loading">Loading product detail...</p>
+              )}
+
+              {isDetailError && (
+                <p className="status status--error">Failed to load product detail</p>
+              )}
+
+              {productDetail && !isDetailLoading && (
+                <div className="product-detail__body">
+                  <p><strong>Category:</strong> {productDetail.category}</p>
+                  <p><strong>Stock:</strong> {productDetail.stock} left</p>
+                  <p><strong>Price:</strong> ${productDetail.price}</p>
+                  <p>{productDetail.description}</p>
+                </div>
+              )}
             </div>
           )}
 

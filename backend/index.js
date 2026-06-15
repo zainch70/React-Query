@@ -42,6 +42,25 @@ app.get("/api/products/stats", (req, res) => {
       res.json({ total, averagePrice: Number(averagePrice.toFixed(2)) })
     }, 1500) // slow on purpose so you see parallel loading
   })
+
+// Dependent query — extra detail for one product (requested when user selects a card)
+app.get("/api/products/:id/detail", (req, res) => {
+    const id = Number(req.params.id)
+    const product = products.find((p) => p.id === id)
+
+    if (!product) {
+        return res.status(404).json({ error: "Product not found" })
+    }
+
+    setTimeout(() => {
+        res.json({
+            ...product,
+            description: `Full description for ${product.name}.`,
+            stock: Math.floor(Math.random() * 50) + 1,
+            category: product.name.toLowerCase().includes("mens") ? "Mens" : "Accessories",
+        })
+    }, 1000)
+})
   
 app.get("/api/products", (req, res) => {
     if(req.query.search) {
