@@ -1,8 +1,9 @@
 // ************************ React Query *********************** 
 import { useState, useEffect } from 'react'
-import { useQuery,keepPreviousData,useMutation,useQueryClient } from '@tanstack/react-query'
+import { useQuery,useInfiniteQuery,keepPreviousData,useMutation,useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 
+const PAGE_LIMIT = 2 // must match backend limit=2
 function App() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -16,14 +17,62 @@ function App() {
 
   //isloading true when First fetch, no data to show yet
   //isfetching true when Any request running (first load or refetch)
-  const { data, isLoading, isError, isFetching,isStale } = useQuery({
-    queryKey: ['products', debouncedSearch],
-    // queryKey: ['products', search], //when search changes, React Query treats it as a new query and refetches.No useEffect or AbortController — React Query cancels the old request when the key changes.
-    queryFn: () => axios.get(`/api/products?search=${debouncedSearch}`).then((res) => res.data),
-    // queryFn: () => axios.get(`/api/products?search=${search}`).then((res) => res.data),
-    enabled:debouncedSearch.length === 0 || debouncedSearch.length > 2, //only fetch data when search is more than 2 characters
-    placeholderData: keepPreviousData, //keep the previous data when the new data is loading
+  // const { data, isLoading, isError, isFetching,isStale } = useQuery({
+  //   queryKey: ['products', debouncedSearch],
+  //   // queryKey: ['products', search], //when search changes, React Query treats it as a new query and refetches.No useEffect or AbortController — React Query cancels the old request when the key changes.
+  //   queryFn: () => axios.get(`/api/products?search=${debouncedSearch}`).then((res) => res.data),
+  //   // queryFn: () => axios.get(`/api/products?search=${search}`).then((res) => res.data),
+  //   enabled:debouncedSearch.length === 0 || debouncedSearch.length > 2, //only fetch data when search is more than 2 characters
+  //   placeholderData: keepPreviousData, //keep the previous data when the new data is loading
+  // })
+
+  const isSearching = debouncedSearch.length > 2
+
+  // Infinite scroll — full list only (no search)
+  const {
+    data: infiniteData,
+    isLoading: isInfiniteLoading,
+    isError: isInfiniteError,
+    isFetching: isInfiniteFetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['products', 'infinite'],
+    queryFn: ({ pageParam }) =>
+      axios.get(`/api/products?page=${pageParam}&limit=${PAGE_LIMIT}`).then((res) => res.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+    enabled: debouncedSearch === '',
   })
+
+  // Search — same as before
+  const {
+    data: searchData,
+    isLoading: isSearchLoading,
+    isError: isSearchError,
+    isFetching: isSearchFetching,
+    isStale: isSearchStale,
+  } = useQuery({
+    queryKey: ['products', debouncedSearch],
+    queryFn: () =>
+      axios.get(`/api/products?search=${debouncedSearch}`).then((res) => res.data),
+    enabled: isSearching,
+    placeholderData: keepPreviousData,
+  })
+
+   //flatten the array of arrays into a single array
+  const products = isSearching
+  ? searchData ?? []
+  : infiniteData?.pages.flatMap((page) => page.products) ?? []
+  //total number of products on the server
+  const totalOnServer = infiniteData?.pages?.[0]?.total
+  const loadedCount = products.length
+
+  const isLoading = isSearching ? isSearchLoading : isInfiniteLoading
+  const isError = isSearching ? isSearchError : isInfiniteError
+  const isFetching = isSearching ? isSearchFetching : isInfiniteFetching
+  const isStale = isSearching ? isSearchStale : false
 
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
@@ -46,47 +95,127 @@ function App() {
   const addProductMutation = useMutation({
     mutationFn: (newProduct) =>
       axios.post('/api/products', newProduct).then((res) => res.data),
+//this is before infinite scroll optimistic update
+    // onMutate: async (newProduct) => {
+    //   // 1. Cancel in-flight refetches so they don't overwrite our optimistic update
+    //   await queryClient.cancelQueries({ queryKey: ['products', debouncedSearch] })
 
+    //   // 2. Save snapshot for rollback
+    //   const previousProducts = queryClient.getQueryData(['products', debouncedSearch])
+
+    //   // 3. Instantly add fake product to cache
+    //   queryClient.setQueryData(['products', debouncedSearch], (old) => [
+    //     ...(old ?? []),
+    //     {
+    //       id: Date.now(), // temporary id until server responds
+    //       name: newProduct.name,
+    //       price: newProduct.price,
+    //       image: newProduct.image,
+    //     },
+    //   ])
+
+    //   // 4. Pass snapshot to onError
+    //   return { previousProducts }
+    // },
+
+    //this is after infinite scroll optimistic update
     onMutate: async (newProduct) => {
-      // 1. Cancel in-flight refetches so they don't overwrite our optimistic update
-      await queryClient.cancelQueries({ queryKey: ['products', debouncedSearch] })
+      const queryKey = debouncedSearch === ''
+        ? ['products', 'infinite']
+        : ['products', debouncedSearch]
 
-      // 2. Save snapshot for rollback
-      const previousProducts = queryClient.getQueryData(['products', debouncedSearch])
+      await queryClient.cancelQueries({ queryKey })
 
-      // 3. Instantly add fake product to cache
-      queryClient.setQueryData(['products', debouncedSearch], (old) => [
+      const previousData = queryClient.getQueryData(queryKey)
+
+      // PATH A: empty search → infinite scroll cache
+      if (debouncedSearch === '') {
+        const tempId = Date.now()
+
+        queryClient.setQueryData(queryKey, (old) => {
+          if (!old?.pages?.length) return old
+          return {
+            ...old,
+            pages: old.pages.map((page, index) =>
+              index === 0
+                ? {
+                    ...page,
+                    products: [
+                      { id: tempId, ...newProduct },
+                      ...page.products,
+                    ].slice(0, PAGE_LIMIT),
+                  }
+                : page
+            ),
+          }
+        })
+
+        return { previousData, queryKey, tempId }
+      }
+
+      // PATH B: active search → plain array cache (append)
+      queryClient.setQueryData(queryKey, (old) => [
         ...(old ?? []),
-        {
-          id: Date.now(), // temporary id until server responds
-          name: newProduct.name,
-          price: newProduct.price,
-          image: newProduct.image,
-        },
+        { id: Date.now(), ...newProduct },
       ])
 
-      // 4. Pass snapshot to onError
-      return { previousProducts }
+      return { previousData, queryKey }
     },
 
     onError: (_err, _newProduct, context) => {
-      // Rollback on failure
-      queryClient.setQueryData(
-        ['products', debouncedSearch],
-        context.previousProducts
-      )
+      queryClient.setQueryData(context.queryKey, context.previousData)
     },
 
-    onSuccess: () => {
+    // onError: (_err, _newProduct, context) => {
+    //   // Rollback on failure
+    //   queryClient.setQueryData(
+    //     ['products', debouncedSearch],
+    //     context.previousProducts
+    //   )
+    // },
+
+    // onSuccess: () => {
+    //   setName('')
+    //   setPrice('')
+    //   setImage('')
+    // },
+
+    onSuccess: (createdProduct, _variables, context) => {
       setName('')
       setPrice('')
       setImage('')
+
+      // Infinite list: swap temp row for real server product (no refetch = no 3→2 flash)
+      if (context?.queryKey?.[1] === 'infinite') {
+        queryClient.setQueryData(['products', 'infinite'], (old) => {
+          if (!old?.pages?.length) return old
+          return {
+            ...old,
+            pages: old.pages.map((page, index) =>
+              index === 0
+                ? {
+                    ...page,
+                    products: [
+                      createdProduct,
+                      ...page.products.filter((p) => p.id !== context.tempId),
+                    ].slice(0, PAGE_LIMIT),
+                  }
+                : page
+            ),
+          }
+        })
+        return
+      }
+
+      // Search list: refetch to sync
+      queryClient.invalidateQueries({ queryKey: context.queryKey })
     },
 
-    onSettled: () => {
-      // Always sync with server after success OR error
-      queryClient.invalidateQueries({ queryKey: ['products'] })
-    },
+    //This was causing the count to drop after add.
+    // onSettled: () => {
+    //   // Always sync with server after success OR error
+    //   queryClient.invalidateQueries({ queryKey: ['products'] })
+    // },
   })
 
   const handleAddProduct = (e) => {
@@ -137,7 +266,9 @@ function App() {
         </button>
 
         {addProductMutation.isError && <p>Failed to add product — list rolled back to previous state</p>}
-        {addProductMutation.isSuccess && <p>Product added successfully!</p>}
+        {addProductMutation.isSuccess && (
+          <p role="status">✓ Product added — it appears at the top of the list</p>
+        )}
        </form>
   
       <input type="text" placeholder="Search products" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -152,7 +283,8 @@ function App() {
       {/* show the fresh data when the new data is loading */}
       {!isFetching && !isStale && <p>Served from cache (fresh)</p>}
 
-      {!isSearchTooShort && (
+    {/* it is for without pagination and search */}
+      {/* {!isSearchTooShort && (
         <>
           <h2>number of products: {data?.length ?? 0}</h2>
           {data?.map((product) => (
@@ -162,6 +294,32 @@ function App() {
               <img src={product.image} alt={product.name} />
             </div>
           ))}
+        </>
+      )} */}
+
+{/* it is for with pagination and search */}
+      {!isSearchTooShort && (
+        <>
+            <h2>
+            {isSearching
+              ? `Found ${loadedCount} product${loadedCount === 1 ? '' : 's'}`
+              : totalOnServer != null
+                ? `Showing ${loadedCount} of ${totalOnServer} product${totalOnServer === 1 ? '' : 's'}${hasNextPage ? ' — load more below' : ''}`
+                : `Showing ${loadedCount} product${loadedCount === 1 ? '' : 's'}`}
+          </h2>
+          {products.map((product) => (
+            <div key={product.id}>
+              <h3>{product.name}</h3>
+              <p>{product.price}</p>
+              <img src={product.image} alt={product.name} />
+            </div>
+          ))}
+
+          {!isSearching && hasNextPage && (
+            <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+              {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+            </button>
+          )}
         </>
       )}
     </>

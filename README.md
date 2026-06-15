@@ -10,11 +10,11 @@ Backend serves dummy products (in-memory); frontend fetches, searches, caches, d
 ```
 react-query/
 ├── backend/          # Express API (port 3000)
-│   └── index.js      # GET /api/products + POST /api/products + optional ?search=
+│   └── index.js      # GET /api/products (pagination + search) + POST /api/products
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + DevTools
-        └── App.jsx   # useQuery + useMutation + optimistic updates + search
+        └── App.jsx   # useInfiniteQuery + useQuery + optimistic updates + search
 ```
 
 ---
@@ -43,7 +43,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates | **~62% overall** / **~88% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery` | **~68% overall** / **~90% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +51,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, added **`enabled`** and global **`defaultOptions`**, and implemented **optimistic updates** on add product.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, and added **`useInfiniteQuery`** with pagination + UX-safe add product.
 
 ### What We Built
 
@@ -491,7 +491,123 @@ Submit → onMutate (UI updates NOW)
 
 **Caveat:** Optimistic update targets the **active** key `['products', debouncedSearch]`. On a filtered search, a new product only appears if that cache key is active (e.g. empty search shows all products).
 
-**vs Step 10:** We still use `invalidateQueries` — moved to `onSettled` so server stays source of truth after success or rollback.
+**vs Step 10:** We still use `invalidateQueries` for search-mode adds. For the full list (infinite query), see [Step 15](#step-15--useinfinitequery--pagination--ux-safe-optimistic-add) — we sync with `setQueryData` in `onSuccess` instead of invalidating, to avoid a confusing count flash.
+
+### Step 15 — `useInfiniteQuery` + pagination + UX-safe optimistic add
+
+**Problem:** Loading all products at once doesn't scale. With pagination, optimistic add + `invalidateQueries` caused a confusing UI: count jumped **3 → 2** (optimistic append on page 1, then refetch restored server's 2-item page).
+
+**Fix:** `useInfiniteQuery` for the full list + tuned optimistic update for paginated cache.
+
+#### Backend — paginated GET + `total`
+
+```js
+const page = Number(req.query.page) || 1
+const limit = Number(req.query.limit) || 2
+const start = (page - 1) * limit
+const pageProducts = products.slice(start, start + limit)
+const nextPage = start + limit < products.length ? page + 1 : undefined
+
+res.json({ products: pageProducts, nextPage, total: products.length })
+```
+
+- **Search** (`?search=mens`) — still returns a plain array (unchanged)
+- **POST** — `products.unshift(newProduct)` so new items appear on page 1
+
+#### Frontend — two hooks (rules of hooks: always call both)
+
+| Mode | Hook | `enabled` when |
+|------|------|----------------|
+| Full list | `useInfiniteQuery` | `debouncedSearch === ''` |
+| Search | `useQuery` | `debouncedSearch.length > 2` |
+
+```jsx
+const PAGE_LIMIT = 2
+
+useInfiniteQuery({
+  queryKey: ['products', 'infinite'],
+  queryFn: ({ pageParam }) =>
+    axios.get(`/api/products?page=${pageParam}&limit=${PAGE_LIMIT}`).then((res) => res.data),
+  initialPageParam: 1,
+  getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+  enabled: debouncedSearch === '',
+})
+```
+
+**Flatten pages for UI:**
+```jsx
+const products = isSearching
+  ? searchData ?? []
+  : infiniteData?.pages.flatMap((page) => page.products) ?? []
+```
+
+**Load more:**
+```jsx
+{hasNextPage && (
+  <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+    {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+  </button>
+)}
+```
+
+#### Key `useInfiniteQuery` options
+
+| Option | Job |
+|--------|-----|
+| `initialPageParam` | First page number (`1`) |
+| `pageParam` in `queryFn` | Current page passed by React Query |
+| `getNextPageParam` | Return `nextPage` from API, or `undefined` when done |
+| `fetchNextPage()` | Fetch the next page |
+| `hasNextPage` | `true` when more pages exist |
+
+**Cache shape:** `{ pages: [{ products, nextPage, total }, ...], pageParams: [1, 2, ...] }` — not a flat array.
+
+#### UX fix — optimistic add without count flash
+
+**Problem users saw:** Add product → count **3** → then **2** (felt like product was removed).
+
+**Why:** Optimistic **append** added a 3rd row on page 1; `invalidateQueries` refetched page 1 with `limit=2` from server.
+
+**Fix (3 parts):**
+
+1. **Optimistic prepend** on page 1, keep page size: `[newProduct, ...page.products].slice(0, PAGE_LIMIT)` — count stays **2**
+2. **`onSuccess`** — swap `tempId` for real `createdProduct` via `setQueryData` (no `invalidateQueries` for infinite)
+3. **Remove `onSettled` invalidate** for infinite path — it caused the refetch flash
+
+```jsx
+onMutate: async (newProduct) => {
+  if (debouncedSearch === '') {
+    const tempId = Date.now()
+    // prepend to page 1, slice to PAGE_LIMIT
+    return { previousData, queryKey, tempId }
+  }
+  // search path: append to array cache
+  return { previousData, queryKey }
+},
+
+onSuccess: (createdProduct, _variables, context) => {
+  if (context?.queryKey?.[1] === 'infinite') {
+    // setQueryData: replace tempId with createdProduct on page 1
+    return  // no invalidate
+  }
+  queryClient.invalidateQueries({ queryKey: context.queryKey })
+},
+```
+
+**UI copy:** `Showing 2 of 5 products — load more below` (uses `total` from API) instead of a bare count that jumps.
+
+**How we tested:**
+1. Empty search → 2 products load → **Load more** → 2 more
+2. Add product → count stays **2**, new product on **top** (no 3→2 flash)
+3. Search `mens` → normal `useQuery` list, no Load more
+4. Force POST `400` → rollback still works
+
+**Mental model:**
+```
+useQuery       → one chunk:  data = Product[]
+useInfiniteQuery → many chunks: data.pages = [{ products }, { products }, ...]
+                                  flatMap → single list for UI
+```
 
 ### What is Server State Management?
 
@@ -701,19 +817,19 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~88%
 Practical patterns (debounce, search)      █████████████████░░░  ~85%
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
-Mutations & sync (useMutation, invalidate, optimistic) ████████████████░░░░  ~70%
+Mutations & sync (useMutation, invalidate, optimistic) █████████████████░░░  ~80%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
 Query tuning (enabled, defaults)           ███████████████░░░░░  ~75%
-Advanced (infinite, optimistic, suspense)  ███████░░░░░░░░░░░░░  ~35%
+Advanced (infinite, prefetch)              ████████████░░░░░░░░  ~40%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next up: `useInfiniteQuery`, `prefetchQuery`, or UI polish (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Next up: `prefetchQuery`, `refetchOnWindowFocus`, or UI polish (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **optimistic updates**; below is what’s still ahead.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **`useInfiniteQuery`**; below is what’s still ahead.
 
 ### Priority checklist
 
@@ -723,23 +839,23 @@ _All priority items learned._ Stretch goals below.
 
 - [ ] **`prefetchQuery`** — preload products before user navigates to a page
 - [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
-- [ ] **`useInfiniteQuery`** — pagination / infinite scroll on product list
+- [x] **`useInfiniteQuery`** — pagination / infinite scroll on product list
 - [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
 - [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
 
 ### Suggested learning order
 
-1. `useInfiniteQuery` (pagination / infinite scroll)
-2. `prefetchQuery` or `refetchOnWindowFocus` tuning
+1. `prefetchQuery` or `refetchOnWindowFocus` tuning
+2. Re-apply product store CSS (optional polish)
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~62% | ~68% |
-| Core fundamentals | ~88% | ~90% |
-| Mutations & sync | ~70% | ~80% |
-| Advanced (infinite, prefetch) | ~15% | ~40% |
+| Overall React Query | ~68% | ~72% |
+| Core fundamentals | ~90% | ~92% |
+| Mutations & sync | ~80% | ~85% |
+| Advanced (prefetch, refetch tuning) | ~20% | ~50% |
 
 ### Topics for later (beyond this section)
 

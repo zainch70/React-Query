@@ -40,9 +40,20 @@ app.get("/api/products", (req, res) => {
         return; //return needed otherwise app crashes
     }
    
+    // setTimeout(() => {
+    //     res.send(products);
+    // }, 3000);
+
+    //pagination 
+    const page = Number(req.query.page) || 1
+    const limit = Number(req.query.limit) || 2
+    const start = (page - 1) * limit
+    const pageProducts = products.slice(start, start + limit)
+    const nextPage = start + limit < products.length ? page + 1 : undefined
+
     setTimeout(() => {
-        res.send(products);
-    }, 3000);
+        res.json({ products: pageProducts, nextPage, total: products.length })
+    }, page === 1 ? 3000 : 1000)
 });
 
 const PORT = 3000;
@@ -62,7 +73,8 @@ app.post("/api/products", (req, res) => {
         image,
     };
 
-    products.push(newProduct);
+    // products.push(newProduct);
+    products.unshift(newProduct)  // new product appears on page 1
     // For learning: we don't persist to a DB — just echo back the created product
     res.status(201).json(newProduct);
 });
