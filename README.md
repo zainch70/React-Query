@@ -10,12 +10,12 @@ Backend serves dummy products (in-memory); frontend fetches, searches, caches, d
 ```
 react-query/
 ├── backend/          # Express API (port 3000)
-│   └── index.js      # GET /api/products (pagination + search) + POST /api/products
+│   └── index.js      # GET /api/products (pagination + search + stats) + POST /api/products
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + refetch/retry + DevTools
-        ├── App.jsx   # useInfiniteQuery + prefetch + optimistic updates + search
-        └── App.css   # Product store layout + cards + form + status banners
+        ├── App.jsx   # infinite + search + parallel stats queries + prefetch + mutations
+        └── App.css   # Product store layout + cards + form + store-stats banner
 ```
 
 ---
@@ -44,7 +44,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery`, `refetchOnWindowFocus`, `retry`, product store CSS | **~78% overall** / **~94% fundamentals** | ✅ Learned |
+| **11–16 June 2026** | Steps 1–18: fundamentals through UI polish · **Step 19:** parallel queries + store stats | **~82% overall** / **~94% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -52,12 +52,12 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, tuned **`refetchOnWindowFocus`** / **`retry`** for production behavior, and polished the **product store UI** with `App.css`.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, tuned **`refetchOnWindowFocus`** / **`retry`**, polished the **product store UI** with `App.css`, and added **parallel queries** for store stats.
 
 ### What We Built
 
 ### Backend
-- Express server with `GET /api/products` and `POST /api/products`
+- Express server with `GET /api/products`, `GET /api/products/stats`, and `POST /api/products`
 - Product names, prices, and images from [fakestoreapi.com](https://fakestoreapi.com) style data
 - Shared in-memory `products` array (module-level) — both GET and POST read/write the same list
 - `express.json()` middleware to parse POST request bodies
@@ -882,6 +882,94 @@ if (isError) {
 
 **Key idea:** CSS only affects presentation — `useQuery`, `useInfiniteQuery`, prefetch, and mutations behave exactly as before.
 
+### Step 19 — Parallel queries (store stats)
+
+**Problem:** The product list and summary stats are separate server data. Fetching them one-after-another adds unnecessary wait time.
+
+**Fix:** Add a **second `useQuery`** that runs **at the same time** as `useInfiniteQuery` — React Query starts both requests on mount without waiting for either to finish.
+
+#### Backend — `GET /api/products/stats`
+
+Place **before** `GET /api/products` so `/stats` is not treated as a search param:
+
+```js
+app.get("/api/products/stats", (req, res) => {
+  const total = products.length
+  const averagePrice =
+    total === 0
+      ? 0
+      : products.reduce((sum, p) => sum + p.price, 0) / total
+
+  setTimeout(() => {
+    res.json({ total, averagePrice: Number(averagePrice.toFixed(2)) })
+  }, 1500) // slower than page 1 (3s) — proves parallel, not sequential
+})
+```
+
+#### Frontend — second hook beside infinite + search
+
+```jsx
+const {
+  data: storeStats,
+  isLoading: isStatsLoading,
+} = useQuery({
+  queryKey: ['products', 'stats'],
+  queryFn: () =>
+    axios.get('/api/products/stats').then((res) => res.data),
+  enabled: debouncedSearch === '', // browse mode only — same rule as infinite list
+})
+```
+
+**Hook placement:** With other hooks at the top of `App()` — after search `useQuery`, before derived `products` / early returns.
+
+| Query | Key | When active |
+|-------|-----|-------------|
+| Infinite list | `['products', 'infinite']` | `debouncedSearch === ''` |
+| Search | `['products', debouncedSearch]` | `debouncedSearch.length > 2` |
+| Store stats | `['products', 'stats']` | `debouncedSearch === ''` |
+
+**Parallel flow on first load (empty search):**
+
+```
+useInfiniteQuery  →  GET /api/products?page=1  (~3s)
+useQuery (stats)  →  GET /api/products/stats   (~1.5s)
+                   ↑ both fire at the same time
+```
+
+Stats can appear **before** the product grid finishes loading — each query has its own loading state.
+
+#### UI — `.store-stats` card (`App.css`)
+
+Below the header when not searching:
+
+```jsx
+{debouncedSearch === '' && (
+  <div className={`store-stats${isStatsLoading ? ' store-stats--loading' : ''}`}>
+    ...
+  </div>
+)}
+```
+
+Shows **Total products** and **Avg price** in a small card (indigo accent, loading tint).
+
+**How we tested:**
+1. Hard refresh → Network tab shows **two requests at once**
+2. DevTools → `['products', 'infinite']` and `['products', 'stats']` both active
+3. Stats line appears ~1.5s; products ~3s — independent timing
+4. Search `mens` → stats query **disabled** (browse-only)
+
+**Optional polish:** After add product, stats may stay stale until `staleTime` expires. Fix later with `invalidateQueries({ queryKey: ['products', 'stats'] })` in mutation `onSuccess`.
+
+**Mental model:**
+
+```
+Parallel  = multiple useQuery hooks → multiple requests at once
+Sequential = await first, then second (we are NOT doing this)
+
+useQueries  = dynamic list of parallel queries (for later / many IDs)
+Two useQuery hooks = simplest parallel pattern (what we used)
+```
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -1094,20 +1182,21 @@ Mutations & sync (useMutation, invalidate, optimistic) ████████�
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
 Query tuning (enabled, defaults, refetch, retry)  █████████████████░░░  ~85%
 Advanced (infinite, prefetch)              ████████████████░░░░  ~50%
+Parallel queries                           ████████████████░░░░  ~80%
 UI polish (App.css product store)          ████████████████████  ~100%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Optional next: parallel queries, Suspense, or testing (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Optional next: dependent queries, Suspense, or testing (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. Fundamentals through **product store CSS** are in [Learned](#-learned).
+> Pick up here when you're ready. Fundamentals through **parallel queries (Step 19)** are in [Learned](#-learned).
 
 ### Suggested learning order
 
-1. Parallel queries / dependent queries
+1. Dependent queries (`enabled` waits on another query's data)
 2. Suspense mode with React Query
 3. Testing queries with mock server
 
@@ -1115,10 +1204,10 @@ UI polish (App.css product store)          ████████████�
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~78% | ~85% |
+| Overall React Query | ~82% | ~88% |
 | Core fundamentals | ~94% | ~95% |
 | Mutations & sync | ~80% | ~85% |
-| Advanced (suspense, testing) | ~50% | ~65% |
+| Advanced (dependent, suspense, testing) | ~55% | ~70% |
 
 ---
 
