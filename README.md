@@ -14,7 +14,7 @@ react-query/
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + DevTools
-        └── App.jsx   # useInfiniteQuery + useQuery + optimistic updates + search
+        └── App.jsx   # useInfiniteQuery + prefetch + optimistic updates + search
 ```
 
 ---
@@ -43,7 +43,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery` | **~68% overall** / **~90% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery` | **~72% overall** / **~91% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +51,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, and added **`useInfiniteQuery`** with pagination + UX-safe add product.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`** with pagination, and **`prefetchQuery`** on Load more hover.
 
 ### What We Built
 
@@ -609,6 +609,101 @@ useInfiniteQuery → many chunks: data.pages = [{ products }, { products }, ...]
                                   flatMap → single list for UI
 ```
 
+### Step 16 — `prefetchQuery` (background preload on hover)
+
+**Problem:** Users wait ~1s when clicking **Load more**. We want to fetch the next page **early** (on hover) but **not** show it until they click.
+
+**First attempt — `prefetchInfiniteQuery`:** Updates the same `['products', 'infinite']` cache → UI grows on hover automatically ❌
+
+**Also blocked by global `staleTime` (5 min):** Prefetch skips fetch when page 1 is still "fresh" unless you pass `staleTime: 0`.
+
+**Fix — separate staging cache + merge on click:**
+
+| Cache key | Purpose |
+|-----------|---------|
+| `['products', 'infinite']` | What `useInfiniteQuery` renders |
+| `['products', 'page', 2]` | Hidden prefetch slot for page 2 |
+
+**Shared config** (must match `useInfiniteQuery`):
+
+```jsx
+const productsInfiniteOptions = {
+  queryKey: ['products', 'infinite'],
+  queryFn: ({ pageParam }) =>
+    axios.get(`/api/products?page=${pageParam}&limit=${PAGE_LIMIT}`).then((res) => res.data),
+  initialPageParam: 1,
+  getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+}
+```
+
+**On hover — `prefetchQuery` into staging key:**
+
+```jsx
+const prefetchNextPage = () => {
+  const nextPage = infiniteData?.pages?.at(-1)?.nextPage
+  if (!nextPage) return
+
+  const prefetchKey = ['products', 'page', nextPage]
+  if (queryClient.getQueryData(prefetchKey)) return
+
+  queryClient.prefetchQuery({
+    queryKey: prefetchKey,
+    queryFn: () =>
+      axios.get(`/api/products?page=${nextPage}&limit=${PAGE_LIMIT}`).then((res) => res.data),
+    staleTime: 0, // bypass global 5min staleTime for prefetch
+  })
+}
+```
+
+**On click — merge prefetched page or fall back to `fetchNextPage`:**
+
+```jsx
+const handleLoadMore = () => {
+  const nextPage = infiniteData?.pages?.at(-1)?.nextPage
+  const prefetchedPage = queryClient.getQueryData(['products', 'page', nextPage])
+
+  if (prefetchedPage) {
+    queryClient.setQueryData(['products', 'infinite'], (old) => ({
+      pages: [...old.pages, prefetchedPage],
+      pageParams: [...old.pageParams, nextPage],
+    }))
+    queryClient.removeQueries({ queryKey: ['products', 'page', nextPage] })
+    return
+  }
+
+  fetchNextPage()
+}
+```
+
+**Flow:**
+```
+Hover  → prefetchQuery(['products', 'page', 2]) → network in background, UI unchanged
+Click  → merge into infinite cache → instant reveal
+Click (no hover) → fetchNextPage() → normal ~1s wait
+```
+
+**Button wiring:**
+```jsx
+<button
+  onMouseEnter={prefetchNextPage}
+  onFocus={prefetchNextPage}
+  onClick={handleLoadMore}
+>
+  Load more
+</button>
+```
+
+**How we tested:**
+1. Hover Load more → Network shows `page=2`, list still **2 products**
+2. Click after hover → **4 products instantly** (no wait)
+3. Click without hover → normal delay
+4. DevTools → staging key `['products', 'page', 2]` appears on hover, removed after merge
+
+**Key lessons:**
+- `prefetchQuery` / `prefetchInfiniteQuery` warm cache **before** user action
+- Prefetching the **same** infinite key updates the UI immediately — use a **separate key** when you want invisible preload
+- Global `staleTime` applies to prefetch unless overridden with `staleTime: 0`
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -820,16 +915,16 @@ Theory (server state, staleTime, gcTime)   ████████████�
 Mutations & sync (useMutation, invalidate, optimistic) █████████████████░░░  ~80%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
 Query tuning (enabled, defaults)           ███████████████░░░░░  ~75%
-Advanced (infinite, prefetch)              ████████████░░░░░░░░  ~40%
+Advanced (infinite, prefetch)              ████████████████░░░░  ~50%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next up: `prefetchQuery`, `refetchOnWindowFocus`, or UI polish (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Next up: `refetchOnWindowFocus` tuning or UI polish (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **`useInfiniteQuery`**; below is what’s still ahead.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **`prefetchQuery`**; below is what’s still ahead.
 
 ### Priority checklist
 
@@ -837,7 +932,7 @@ _All priority items learned._ Stretch goals below.
 
 ### Stretch goals (if time allows)
 
-- [ ] **`prefetchQuery`** — preload products before user navigates to a page
+- [x] **`prefetchQuery`** — preload next page on Load more hover (separate cache + merge on click)
 - [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
 - [x] **`useInfiniteQuery`** — pagination / infinite scroll on product list
 - [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
@@ -845,17 +940,17 @@ _All priority items learned._ Stretch goals below.
 
 ### Suggested learning order
 
-1. `prefetchQuery` or `refetchOnWindowFocus` tuning
+1. `refetchOnWindowFocus` tuning
 2. Re-apply product store CSS (optional polish)
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~68% | ~72% |
-| Core fundamentals | ~90% | ~92% |
+| Overall React Query | ~72% | ~75% |
+| Core fundamentals | ~91% | ~93% |
 | Mutations & sync | ~80% | ~85% |
-| Advanced (prefetch, refetch tuning) | ~20% | ~50% |
+| Advanced (refetch tuning, polish) | ~30% | ~55% |
 
 ### Topics for later (beyond this section)
 

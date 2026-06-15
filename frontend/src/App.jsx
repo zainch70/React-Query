@@ -4,6 +4,14 @@ import { useQuery,useInfiniteQuery,keepPreviousData,useMutation,useQueryClient }
 import axios from 'axios'
 
 const PAGE_LIMIT = 2 // must match backend limit=2
+const productsInfiniteOptions = {
+  queryKey: ['products', 'infinite'],
+  queryFn: ({ pageParam }) =>
+    axios.get(`/api/products?page=${pageParam}&limit=${PAGE_LIMIT}`).then((res) => res.data),
+  initialPageParam: 1,
+  getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+}
+
 function App() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -38,11 +46,7 @@ function App() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['products', 'infinite'],
-    queryFn: ({ pageParam }) =>
-      axios.get(`/api/products?page=${pageParam}&limit=${PAGE_LIMIT}`).then((res) => res.data),
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+   ...productsInfiniteOptions,
     enabled: debouncedSearch === '',
   })
 
@@ -79,6 +83,50 @@ function App() {
   const [image, setImage] = useState('')
 
   const queryClient = useQueryClient()
+  const prefetchNextPage = () => {
+    if (!hasNextPage || isFetchingNextPage || isSearching) return
+
+    const nextPage = infiniteData?.pages?.at(-1)?.nextPage
+    if (!nextPage) return
+
+    const prefetchKey = ['products', 'page', nextPage]//This loads page 2 into ['products', 'page', 2] — not into the infinite list the UI reads.
+
+    // already prefetched — don't fetch again
+    if (queryClient.getQueryData(prefetchKey)) return
+
+    queryClient.prefetchQuery({
+      queryKey: prefetchKey,
+      queryFn: () =>
+        axios
+          .get(`/api/products?page=${nextPage}&limit=${PAGE_LIMIT}`)
+          .then((res) => res.data),
+      staleTime: 0,
+    })
+  }
+
+  const handleLoadMore = () => {
+    const nextPage = infiniteData?.pages?.at(-1)?.nextPage
+    if (!nextPage) return
+
+    const prefetchKey = ['products', 'page', nextPage]
+    const prefetchedPage = queryClient.getQueryData(prefetchKey)
+
+    // prefetched on hover → merge instantly, no network wait
+    if (prefetchedPage) {
+      queryClient.setQueryData(['products', 'infinite'], (old) => {
+        if (!old) return old
+        return {
+          pages: [...old.pages, prefetchedPage],
+          pageParams: [...old.pageParams, nextPage],
+        }
+      })
+      queryClient.removeQueries({ queryKey: prefetchKey })
+      return
+    }
+
+    // no prefetch → normal fetch
+    fetchNextPage()
+  }
 
   // const addProductMutation = useMutation({
   //   mutationFn: (newProduct) =>
@@ -316,7 +364,19 @@ function App() {
           ))}
 
           {!isSearching && hasNextPage && (
-            <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+            <p style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+              Tip: hover Load more to prefetch the next page
+            </p>
+          )}
+          <br />
+          {/* load more button with prefetching to avoid flickering */}
+          {!isSearching && hasNextPage && (
+            <button
+              onMouseEnter={prefetchNextPage}
+              onFocus={prefetchNextPage}
+              onClick={handleLoadMore}
+              disabled={isFetchingNextPage}
+            >
               {isFetchingNextPage ? 'Loading more...' : 'Load more'}
             </button>
           )}
@@ -328,6 +388,7 @@ function App() {
 
 export default App
 
+//***********Chai with react basic understanding code*********
 // import { useState, useEffect } from 'react'
 // import axios from 'axios'
 
