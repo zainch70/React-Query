@@ -13,7 +13,7 @@ react-query/
 │   └── index.js      # GET /api/products (pagination + search) + POST /api/products
 └── frontend/         # React + Vite (port 5173)
     └── src/
-        ├── main.jsx  # QueryClientProvider + defaultOptions + DevTools
+        ├── main.jsx  # QueryClientProvider + defaultOptions + refetch/retry + DevTools
         └── App.jsx   # useInfiniteQuery + prefetch + optimistic updates + search
 ```
 
@@ -43,7 +43,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery` | **~72% overall** / **~91% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery`, `refetchOnWindowFocus`, `retry` | **~75% overall** / **~92% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +51,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`** with pagination, and **`prefetchQuery`** on Load more hover.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, and tuned **`refetchOnWindowFocus`** / **`retry`** for production behavior.
 
 ### What We Built
 
@@ -704,6 +704,69 @@ Click (no hover) → fetchNextPage() → normal ~1s wait
 - Prefetching the **same** infinite key updates the UI immediately — use a **separate key** when you want invisible preload
 - Global `staleTime` applies to prefetch unless overridden with `staleTime: 0`
 
+### Step 17 — `refetchOnWindowFocus` + `retry` (production tuning)
+
+**Problem:** By default React Query refetches on tab focus and retries failures — but with a long `staleTime`, focus refetch often **does nothing** (data still fresh). We made behavior **explicit** and learned per-query overrides.
+
+**Global defaults in `main.jsx`:**
+
+```jsx
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 10,
+      refetchOnWindowFocus: true,   // refetch stale queries when user returns to tab
+      refetchOnReconnect: true,     // refetch stale queries when network reconnects
+      retry: 2,                     // retry failed requests 2 times (default is 3)
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    },
+  },
+})
+```
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| **`refetchOnWindowFocus`** | `true` | User returns to tab → refetch **if stale** |
+| **`refetchOnReconnect`** | `true` | Network back online → refetch **if stale** |
+| **`retry`** | `3` (we use `2`) | Retry failed requests N times |
+| **`retryDelay`** | exponential | Wait between retries (1s, 2s, … cap 30s) |
+
+**Critical interaction with `staleTime`:**
+
+```
+Tab switch + data FRESH (within 5 min)  →  NO refetch (even if refetchOnWindowFocus: true)
+Tab switch + data STALE (after 5 min)   →  refetch in background
+```
+
+**Per-query override** — infinite list opts out of focus refetch:
+
+```jsx
+useInfiniteQuery({
+  ...productsInfiniteOptions,
+  enabled: debouncedSearch === '',
+  refetchOnWindowFocus: false,  // override global true
+})
+```
+
+| Mode | Focus refetch? |
+|------|----------------|
+| Empty search (infinite) | **No** — per-query `false` |
+| Search (`useQuery`) | **Yes, if stale** — uses global `true` + 5 min `staleTime` |
+
+**How we tested:**
+1. Search `mens` → switch tab → back within 5 min → **no** refetch (still fresh)
+2. DevTools → Invalidate search query → switch tab → back → refetch runs
+3. Empty search → switch tab → back → **no** refetch (infinite override)
+4. Stop backend → reload → `retry: 2` shows multiple attempts in Network tab
+
+**Mental model:**
+```
+refetchOnWindowFocus is NOT "always refetch on tab switch"
+It is "refetch on tab switch IF data is stale"
+staleTime controls WHEN data becomes stale
+```
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -914,43 +977,42 @@ Practical patterns (debounce, search)      ████████████�
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
 Mutations & sync (useMutation, invalidate, optimistic) █████████████████░░░  ~80%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
-Query tuning (enabled, defaults)           ███████████████░░░░░  ~75%
+Query tuning (enabled, defaults, refetch, retry)  █████████████████░░░  ~85%
 Advanced (infinite, prefetch)              ████████████████░░░░  ~50%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next up: `refetchOnWindowFocus` tuning or UI polish (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Optional next: re-apply product store CSS (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **`prefetchQuery`**; below is what’s still ahead.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **`refetchOnWindowFocus`** / **`retry`**; below is optional polish and advanced topics.
 
 ### Priority checklist
 
-_All priority items learned._ Stretch goals below.
+_All React Query priority items learned._ Optional polish below.
 
 ### Stretch goals (if time allows)
 
 - [x] **`prefetchQuery`** — preload next page on Load more hover (separate cache + merge on click)
 - [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
 - [x] **`useInfiniteQuery`** — pagination / infinite scroll on product list
-- [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
+- [x] **Retry & `refetchOnWindowFocus`** — global defaults + per-query override on infinite query
 - [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
 
 ### Suggested learning order
 
-1. `refetchOnWindowFocus` tuning
-2. Re-apply product store CSS (optional polish)
+1. Re-apply product store CSS (optional polish)
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~72% | ~75% |
-| Core fundamentals | ~91% | ~93% |
+| Overall React Query | ~75% | ~78% |
+| Core fundamentals | ~92% | ~94% |
 | Mutations & sync | ~80% | ~85% |
-| Advanced (refetch tuning, polish) | ~30% | ~55% |
+| Advanced (polish, suspense, testing) | ~35% | ~55% |
 
 ### Topics for later (beyond this section)
 

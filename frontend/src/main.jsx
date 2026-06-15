@@ -11,6 +11,10 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 5,  ////React Query won't refetch for 5 minutes and treat cached data as fresh
       gcTime: 1000 * 60 * 10,    // After you leave a search, its cache stays in memory for 10 min
+      refetchOnWindowFocus: true,   // refetch stale queries when user returns to tab
+      refetchOnReconnect: true,     // refetch stale queries when network reconnects
+      retry: 2,                     // retry failed requests 2 times (default is 3)
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // 30 seconds max
     },
   },
 });

@@ -48,6 +48,7 @@ function App() {
   } = useInfiniteQuery({
    ...productsInfiniteOptions,
     enabled: debouncedSearch === '',
+    refetchOnWindowFocus: false, //override the default behaviour of refetching on window focus
   })
 
   // Search — same as before
@@ -63,6 +64,8 @@ function App() {
       axios.get(`/api/products?search=${debouncedSearch}`).then((res) => res.data),
     enabled: isSearching,
     placeholderData: keepPreviousData,
+    // staleTime: 0, // TEST ONLY — always stale, so focus triggers refetch
+    // refetchOnWindowFocus: true,
   })
 
    //flatten the array of arrays into a single array
