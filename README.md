@@ -14,7 +14,7 @@ react-query/
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + DevTools
-        └── App.jsx   # useQuery + useMutation + search + debounce + enabled
+        └── App.jsx   # useQuery + useMutation + optimistic updates + search
 ```
 
 ---
@@ -43,7 +43,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, `enabled`, `defaultOptions` | **~58% overall** / **~88% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates | **~62% overall** / **~88% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +51,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, added **`enabled`** for conditional fetching, and moved **`staleTime` / `gcTime`** to global **`defaultOptions`**.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, added **`enabled`** and global **`defaultOptions`**, and implemented **optimistic updates** on add product.
 
 ### What We Built
 
@@ -422,6 +422,77 @@ main.jsx
 
 **Production pattern:** globals for shared defaults; per-query options only when one query needs something different (e.g. `staleTime: 0` for live dashboard data).
 
+### Step 14 — Optimistic updates (`onMutate` + `setQueryData`)
+
+**Problem:** With `invalidateQueries` only, the user submits the form and waits for POST + refetch before the new product appears — noticeable network latency.
+
+**Fix:** **Optimistic update** — edit the cache immediately on submit, then let POST run in the background. Roll back if it fails.
+
+```jsx
+const addProductMutation = useMutation({
+  mutationFn: (newProduct) =>
+    axios.post('/api/products', newProduct).then((res) => res.data),
+
+  onMutate: async (newProduct) => {
+    await queryClient.cancelQueries({ queryKey: ['products', debouncedSearch] })
+    const previousProducts = queryClient.getQueryData(['products', debouncedSearch])
+
+    queryClient.setQueryData(['products', debouncedSearch], (old) => [
+      ...(old ?? []),
+      { id: Date.now(), ...newProduct },
+    ])
+
+    return { previousProducts }
+  },
+
+  onError: (_err, _newProduct, context) => {
+    queryClient.setQueryData(['products', debouncedSearch], context.previousProducts)
+  },
+
+  onSuccess: () => { /* clear form */ },
+
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: ['products'] })
+  },
+})
+```
+
+**Mutation lifecycle:**
+
+| Callback | When | Job |
+|----------|------|-----|
+| **`onMutate`** | Before POST | Cancel refetches, snapshot cache, `setQueryData` with temp product |
+| **`mutationFn`** | During | Real POST |
+| **`onError`** | POST failed | Restore snapshot (rollback) |
+| **`onSuccess`** | POST OK | Clear form |
+| **`onSettled`** | Always | `invalidateQueries` — sync real server `id` |
+
+```
+Submit → onMutate (UI updates NOW)
+      → POST (background)
+      → success: onSettled → invalidate → real id from server
+      → error: onError → rollback → onSettled → invalidate
+```
+
+| Approach | When UI updates |
+|----------|-----------------|
+| **`invalidateQueries` only** | After POST + refetch |
+| **Optimistic** | Instantly on submit |
+
+**Key APIs introduced:**
+- **`setQueryData`** — manually write to cache (optimistic fake row)
+- **`getQueryData`** — read current cache (for snapshot)
+- **`cancelQueries`** — stop in-flight refetches from overwriting optimistic data
+
+**How we tested:**
+1. Add product on empty search → count increases **before** POST finishes
+2. Success → `invalidateQueries` replaces temp `id` with server `id`
+3. Force POST `400` on backend → list rolls back, error: *"Failed to add product — list rolled back to previous state"*
+
+**Caveat:** Optimistic update targets the **active** key `['products', debouncedSearch]`. On a filtered search, a new product only appears if that cache key is active (e.g. empty search shows all products).
+
+**vs Step 10:** We still use `invalidateQueries` — moved to `onSettled` so server stays source of truth after success or rollback.
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -630,19 +701,19 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~88%
 Practical patterns (debounce, search)      █████████████████░░░  ~85%
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
-Mutations & sync (useMutation, invalidate) ████████████░░░░░░░░  ~60%
+Mutations & sync (useMutation, invalidate, optimistic) ████████████████░░░░  ~70%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
-Query tuning (enabled, defaults)             ███████████████░░░░░  ~75%
-Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░░░░░░░░░  ~0%
+Query tuning (enabled, defaults)           ███████████████░░░░░  ~75%
+Advanced (infinite, optimistic, suspense)  ███████░░░░░░░░░░░░░  ~35%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next up: advanced patterns (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Next up: `useInfiniteQuery`, `prefetchQuery`, or UI polish (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **`defaultOptions`**; below is what’s still ahead — advanced patterns and polish.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **optimistic updates**; below is what’s still ahead.
 
 ### Priority checklist
 
@@ -651,29 +722,28 @@ _All priority items learned._ Stretch goals below.
 ### Stretch goals (if time allows)
 
 - [ ] **`prefetchQuery`** — preload products before user navigates to a page
-- [ ] **Optimistic updates** — update UI instantly before API responds, rollback on error
+- [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
 - [ ] **`useInfiniteQuery`** — pagination / infinite scroll on product list
 - [ ] **Retry & `refetchOnWindowFocus`** — tune production refetch behavior
 - [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
 
 ### Suggested learning order
 
-1. (Stretch) optimistic updates or infinite query
-2. (Stretch) `prefetchQuery` or `refetchOnWindowFocus` tuning
+1. `useInfiniteQuery` (pagination / infinite scroll)
+2. `prefetchQuery` or `refetchOnWindowFocus` tuning
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~58% | ~65% |
+| Overall React Query | ~62% | ~68% |
 | Core fundamentals | ~88% | ~90% |
-| Mutations & sync | ~60% | ~70% |
-| Advanced (infinite, optimistic, prefetch) | ~0% | ~40% |
+| Mutations & sync | ~70% | ~80% |
+| Advanced (infinite, prefetch) | ~15% | ~40% |
 
 ### Topics for later (beyond this section)
 
 - Parallel queries / dependent queries
-- `setQueryData` (manual cache updates)
 - Suspense mode with React Query
 - Testing queries with mock server
 

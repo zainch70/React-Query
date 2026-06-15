@@ -31,15 +31,62 @@ function App() {
 
   const queryClient = useQueryClient()
 
+  // const addProductMutation = useMutation({
+  //   mutationFn: (newProduct) =>
+  //     axios.post('/api/products', newProduct).then((res) => res.data),
+  //   onSuccess: () => {
+  //     queryClient.invalidateQueries({ queryKey: ['products'] }) //invalidate the query to get the latest data
+  //     setName('')
+  //     setPrice('')
+  //     setImage('')
+  //   }
+  // })
+
+  //optimistic update is a technique to update the UI immediately before the server responds. so it cause immediate ui updates to avoid network round trip latency and fetches in background.
   const addProductMutation = useMutation({
     mutationFn: (newProduct) =>
       axios.post('/api/products', newProduct).then((res) => res.data),
+
+    onMutate: async (newProduct) => {
+      // 1. Cancel in-flight refetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['products', debouncedSearch] })
+
+      // 2. Save snapshot for rollback
+      const previousProducts = queryClient.getQueryData(['products', debouncedSearch])
+
+      // 3. Instantly add fake product to cache
+      queryClient.setQueryData(['products', debouncedSearch], (old) => [
+        ...(old ?? []),
+        {
+          id: Date.now(), // temporary id until server responds
+          name: newProduct.name,
+          price: newProduct.price,
+          image: newProduct.image,
+        },
+      ])
+
+      // 4. Pass snapshot to onError
+      return { previousProducts }
+    },
+
+    onError: (_err, _newProduct, context) => {
+      // Rollback on failure
+      queryClient.setQueryData(
+        ['products', debouncedSearch],
+        context.previousProducts
+      )
+    },
+
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] }) //invalidate the query to get the latest data
       setName('')
       setPrice('')
       setImage('')
-    }
+    },
+
+    onSettled: () => {
+      // Always sync with server after success OR error
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
   })
 
   const handleAddProduct = (e) => {
@@ -89,7 +136,7 @@ function App() {
           {addProductMutation.isPending ? 'Adding...' : 'Add Product'}
         </button>
 
-        {addProductMutation.isError && <p>Failed to add product</p>}
+        {addProductMutation.isError && <p>Failed to add product — list rolled back to previous state</p>}
         {addProductMutation.isSuccess && <p>Product added successfully!</p>}
        </form>
   
