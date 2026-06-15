@@ -1,4 +1,5 @@
 // ************************ React Query *********************** 
+import './App.css'
 import { useState, useEffect } from 'react'
 import { useQuery,useInfiniteQuery,keepPreviousData,useMutation,useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -279,19 +280,41 @@ function App() {
     })
   }
 
+  // --- before Part J (plain loading/error screens) ---
+  // if (isLoading) {
+  //   return <h1>Loading...</h1>
+  // }
+  // if (isError) {
+  //   return <h1>Error fetching products</h1>
+  // }
+  // --- end before Part J ---
+
   if (isLoading) {
-    return <h1>Loading...</h1>
+    return (
+      <div className="app">
+        <p className="status status--loading">Loading products...</p>
+      </div>
+    )
   }
   
   const isSearchTooShort = debouncedSearch.length > 0 && debouncedSearch.length <= 2
 
   if (isError) {
-    return <h1>Error fetching products</h1>
+    return (
+      <div className="app">
+        <p className="status status--error">Error fetching products</p>
+      </div>
+    )
   }
 
   return (
-    <>
-      <h1>Hello World</h1>
+    <div className="app">
+      <header className="header">
+        <h1>Product Store</h1>
+        <p>React Query learning app — browse, search, and add products</p>
+      </header>
+
+       {/* --- before Part H+I (plain form) ---
        <form onSubmit={handleAddProduct}>
         <h2>Add Product</h2>
         <input
@@ -321,18 +344,65 @@ function App() {
           <p role="status">✓ Product added — it appears at the top of the list</p>
         )}
        </form>
+       --- end before Part H+I --- */}
+
+       {/* Part H+I — styled add product form */}
+       <form className="add-product-form" onSubmit={handleAddProduct}>
+        <h2>Add Product</h2>
+        <input
+          type="text"
+          placeholder="Product name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          type="number"
+          placeholder="Price"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <input
+          type="text"
+          placeholder="Image URL"
+          value={image}
+          onChange={(e) => setImage(e.target.value)}
+        />
+        <button type="submit" disabled={addProductMutation.isPending}>
+          {addProductMutation.isPending ? 'Adding...' : 'Add Product'}
+        </button>
+
+        {addProductMutation.isError && (
+          <p className="form-message--error">Failed to add product — list rolled back to previous state</p>
+        )}
+        {addProductMutation.isSuccess && (
+          <p className="form-message--success" role="status">
+            ✓ Product added — it appears at the top of the list
+          </p>
+        )}
+       </form>
   
-      <input type="text" placeholder="Search products" value={search} onChange={(e) => setSearch(e.target.value)} />
+       {/* --- before Part D (plain search input) ---
+       <input type="text" placeholder="Search products" value={search} onChange={(e) => setSearch(e.target.value)} />
+       --- end before Part D --- */}
 
-      {search !== debouncedSearch && <p>Waiting for you to stop typing...</p>}
+       {/* Part D — styled search bar */}
+       <input
+         type="text"
+         className="search-bar"
+         placeholder="Search products..."
+         value={search}
+         onChange={(e) => setSearch(e.target.value)}
+       />
 
-      {isSearchTooShort && <p>Type at least 3 characters to search</p>}
+      {search !== debouncedSearch && <p className="status status--loading">Waiting for you to stop typing...</p>}
+
+      {isSearchTooShort && <p className="status status--loading">Type at least 3 characters to search</p>}
 
       {/* show the previous data when the new data is loading */}
-      {isFetching && <p>fetching from api...</p>}
+      {isFetching && <p className="status status--loading">fetching from api...</p>}
 
       {/* show the fresh data when the new data is loading */}
-      {!isFetching && !isStale && <p>Served from cache (fresh)</p>}
+      {!isFetching && !isStale && <p className="status" style={{ color: '#6b7280', background: '#f3f4f6' }}>Served from cache (fresh)</p>}
 
     {/* it is for without pagination and search */}
       {/* {!isSearchTooShort && (
@@ -351,6 +421,7 @@ function App() {
 {/* it is for with pagination and search */}
       {!isSearchTooShort && (
         <>
+          {/* --- before Part F (plain list) ---
             <h2>
             {isSearching
               ? `Found ${loadedCount} product${loadedCount === 1 ? '' : 's'}`
@@ -365,14 +436,46 @@ function App() {
               <img src={product.image} alt={product.name} />
             </div>
           ))}
+          --- end before Part F --- */}
 
+          {/* Part F — product count + grid + cards */}
+          <p className="product-count">
+            {isSearching
+              ? <>Found <strong>{loadedCount}</strong> product{loadedCount === 1 ? '' : 's'}</>
+              : totalOnServer != null
+                ? <>Showing <strong>{loadedCount}</strong> of <strong>{totalOnServer}</strong> products{hasNextPage ? ' — load more below' : ''}</>
+                : <>Showing <strong>{loadedCount}</strong> product{loadedCount === 1 ? '' : 's'}</>}
+          </p>
+
+          {products.length === 0 ? (
+            <p className="empty-state">No products found</p>
+          ) : (
+            <div className="product-grid">
+              {products.map((product) => (
+                <article key={product.id} className="product-card">
+                  <div className="product-card__image-wrap">
+                    <img
+                      className="product-card__image"
+                      src={product.image}
+                      alt={product.name}
+                    />
+                  </div>
+                  <div className="product-card__body">
+                    <h3 className="product-card__name">{product.name}</h3>
+                    <p className="product-card__price">{product.price}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {/* --- before Part G (plain tip + button) ---
           {!isSearching && hasNextPage && (
             <p style={{ fontSize: '0.85rem', color: '#6b7280' }}>
               Tip: hover Load more to prefetch the next page
             </p>
           )}
           <br />
-          {/* load more button with prefetching to avoid flickering */}
           {!isSearching && hasNextPage && (
             <button
               onMouseEnter={prefetchNextPage}
@@ -383,9 +486,28 @@ function App() {
               {isFetchingNextPage ? 'Loading more...' : 'Load more'}
             </button>
           )}
+          --- end before Part G --- */}
+
+          {/* Part G — styled tip + load more button */}
+          {!isSearching && hasNextPage && (
+            <p className="product-count">Tip: hover Load more to prefetch the next page</p>
+          )}
+
+          {!isSearching && hasNextPage && (
+            <button
+              type="button"
+              className="load-more-btn"
+              onMouseEnter={prefetchNextPage}
+              onFocus={prefetchNextPage}
+              onClick={handleLoadMore}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+            </button>
+          )}
         </>
       )}
-    </>
+    </div>
   )
 }
 

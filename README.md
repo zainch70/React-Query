@@ -14,7 +14,8 @@ react-query/
 └── frontend/         # React + Vite (port 5173)
     └── src/
         ├── main.jsx  # QueryClientProvider + defaultOptions + refetch/retry + DevTools
-        └── App.jsx   # useInfiniteQuery + prefetch + optimistic updates + search
+        ├── App.jsx   # useInfiniteQuery + prefetch + optimistic updates + search
+        └── App.css   # Product store layout + cards + form + status banners
 ```
 
 ---
@@ -43,7 +44,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery`, `refetchOnWindowFocus`, `retry` | **~75% overall** / **~92% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, mutations, DevTools, `enabled`, `defaultOptions`, optimistic updates, `useInfiniteQuery`, `prefetchQuery`, `refetchOnWindowFocus`, `retry`, product store CSS | **~78% overall** / **~94% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +52,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, and tuned **`refetchOnWindowFocus`** / **`retry`** for production behavior.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools**, added **`enabled`** and global **`defaultOptions`**, implemented **optimistic updates**, **`useInfiniteQuery`**, **`prefetchQuery`**, tuned **`refetchOnWindowFocus`** / **`retry`** for production behavior, and polished the **product store UI** with `App.css`.
 
 ### What We Built
 
@@ -767,6 +768,50 @@ It is "refetch on tab switch IF data is stale"
 staleTime controls WHEN data becomes stale
 ```
 
+### Step 18 — Product store UI polish (`App.css`)
+
+**Goal:** Keep all React Query logic unchanged; improve layout and feedback with a dedicated stylesheet.
+
+**Setup:**
+```jsx
+import './App.css'
+```
+
+**What we styled (incremental parts):**
+
+| Part | Classes | Purpose |
+|------|---------|---------|
+| B/C | `.app`, `.header` | Centered layout + page title |
+| D | `.search-bar` | Full-width search with focus ring |
+| E | `.status`, `.status--loading`, `.status--error` | Debounce / fetch / short-search messages |
+| F | `.product-count`, `.product-grid`, `.product-card` | Count line + responsive card grid |
+| G | `.load-more-btn` | Primary button for pagination |
+| H/I | `.add-product-form`, `.form-message--error`, `.form-message--success` | Add product card + mutation feedback |
+| J | `.app` + `.status` on early returns | Full-page loading / error screens |
+
+**Pattern:** Old plain JSX was **commented**, not deleted — so you can compare before/after in `App.jsx`.
+
+**Loading / error screens (Part J):**
+```jsx
+if (isLoading) {
+  return (
+    <div className="app">
+      <p className="status status--loading">Loading products...</p>
+    </div>
+  )
+}
+
+if (isError) {
+  return (
+    <div className="app">
+      <p className="status status--error">Error fetching products</p>
+    </div>
+  )
+}
+```
+
+**Key idea:** CSS only affects presentation — `useQuery`, `useInfiniteQuery`, prefetch, and mutations behave exactly as before.
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -972,26 +1017,27 @@ This is the **tradeoff**: better performance vs possibly outdated UI. Fix option
 ### Progress snapshot (learned)
 
 ```
-Fundamentals (useQuery, cache, keys)       █████████████████░░░  ~88%
+Fundamentals (useQuery, cache, keys)       ██████████████████░░  ~90%
 Practical patterns (debounce, search)      █████████████████░░░  ~85%
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
 Mutations & sync (useMutation, invalidate, optimistic) █████████████████░░░  ~80%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
 Query tuning (enabled, defaults, refetch, retry)  █████████████████░░░  ~85%
 Advanced (infinite, prefetch)              ████████████████░░░░  ~50%
+UI polish (App.css product store)          ████████████████████  ~100%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Optional next: re-apply product store CSS (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Optional next: parallel queries, Suspense, or testing (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **`refetchOnWindowFocus`** / **`retry`**; below is optional polish and advanced topics.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **product store CSS**; below are advanced topics for later.
 
 ### Priority checklist
 
-_All React Query priority items learned._ Optional polish below.
+_All React Query priority items learned._ UI polish complete.
 
 ### Stretch goals (if time allows)
 
@@ -999,20 +1045,22 @@ _All React Query priority items learned._ Optional polish below.
 - [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
 - [x] **`useInfiniteQuery`** — pagination / infinite scroll on product list
 - [x] **Retry & `refetchOnWindowFocus`** — global defaults + per-query override on infinite query
-- [ ] **Re-apply product store CSS** — polish the UI from earlier in the project
+- [x] **Product store CSS** — `App.css` layout, cards, form, status banners, loading/error screens
 
 ### Suggested learning order
 
-1. Re-apply product store CSS (optional polish)
+1. Parallel queries / dependent queries
+2. Suspense mode with React Query
+3. Testing queries with mock server
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~75% | ~78% |
-| Core fundamentals | ~92% | ~94% |
+| Overall React Query | ~78% | ~85% |
+| Core fundamentals | ~94% | ~95% |
 | Mutations & sync | ~80% | ~85% |
-| Advanced (polish, suspense, testing) | ~35% | ~55% |
+| Advanced (suspense, testing) | ~50% | ~65% |
 
 ### Topics for later (beyond this section)
 

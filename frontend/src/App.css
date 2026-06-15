@@ -144,6 +144,92 @@
   font-size: 1rem;
 }
 
+.load-more-btn {
+  display: block;
+  margin: 1rem auto 0;
+  padding: 0.65rem 1.25rem;
+  border: none;
+  border-radius: 8px;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.load-more-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.add-product-form {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.add-product-form h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  color: #1a1a2e;
+}
+
+.add-product-form input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.add-product-form input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.add-product-form button {
+  padding: 0.65rem 1.25rem;
+  border: none;
+  border-radius: 8px;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.add-product-form button:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.add-product-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-message--error {
+  color: #dc2626;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.form-message--success {
+  color: #059669;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 600px) {
   .app {
     padding: 1.25rem 1rem 2rem;
