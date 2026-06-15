@@ -1033,19 +1033,7 @@ UI polish (App.css product store)          ████████████�
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through **product store CSS**; below are advanced topics for later.
-
-### Priority checklist
-
-_All React Query priority items learned._ UI polish complete.
-
-### Stretch goals (if time allows)
-
-- [x] **`prefetchQuery`** — preload next page on Load more hover (separate cache + merge on click)
-- [x] **Optimistic updates** — update UI instantly before API responds, rollback on error
-- [x] **`useInfiniteQuery`** — pagination / infinite scroll on product list
-- [x] **Retry & `refetchOnWindowFocus`** — global defaults + per-query override on infinite query
-- [x] **Product store CSS** — `App.css` layout, cards, form, status banners, loading/error screens
+> Pick up here when you're ready. Fundamentals through **product store CSS** are in [Learned](#-learned).
 
 ### Suggested learning order
 
@@ -1061,12 +1049,6 @@ _All React Query priority items learned._ UI polish complete.
 | Core fundamentals | ~94% | ~95% |
 | Mutations & sync | ~80% | ~85% |
 | Advanced (suspense, testing) | ~50% | ~65% |
-
-### Topics for later (beyond this section)
-
-- Parallel queries / dependent queries
-- Suspense mode with React Query
-- Testing queries with mock server
 
 ---
 
