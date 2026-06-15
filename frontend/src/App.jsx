@@ -69,6 +69,18 @@ function App() {
     // refetchOnWindowFocus: true,
   })
 
+  // Step 19 — parallel query: store stats (runs alongside infinite query)
+  const {
+    data: storeStats,
+    isLoading: isStatsLoading,
+    isFetching: isStatsFetching,
+  } = useQuery({
+    queryKey: ['products', 'stats'],
+    queryFn: () =>
+      axios.get('/api/products/stats').then((res) => res.data),
+    enabled: debouncedSearch === '', // same as infinite — browse mode only
+  })
+
    //flatten the array of arrays into a single array
   const products = isSearching
   ? searchData ?? []
@@ -316,6 +328,41 @@ function App() {
         <p>React Query learning app — browse, search, and add products</p>
       </header>
 
+      {/* --- before Step 19 CSS (plain product-count) ---
+      {debouncedSearch === '' && (
+        <p className="product-count">
+          {isStatsLoading
+            ? 'Loading store stats...'
+            : storeStats
+              ? `Store stats: ${storeStats.total} products · avg price $${storeStats.averagePrice}`
+              : null}
+        </p>
+      )}
+      --- end before Step 19 CSS --- */}
+
+      {/* Step 19 — store stats (parallel query) */}
+      {debouncedSearch === '' && (
+        <div className={`store-stats${isStatsLoading ? ' store-stats--loading' : ''}`}>
+          {isStatsLoading ? (
+            <p className="store-stats__message">Loading store stats...</p>
+          ) : storeStats ? (
+            <>
+              <div className="store-stats__item">
+                <span className="store-stats__label">Total products</span>
+                <span className="store-stats__value">{storeStats.total}</span>
+              </div>
+              <div className="store-stats__divider" aria-hidden="true" />
+              <div className="store-stats__item">
+                <span className="store-stats__label">Avg price</span>
+                <span className="store-stats__value store-stats__value--price">
+                  ${storeStats.averagePrice}
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
+      
        {/* --- before Part H+I (plain form) ---
        <form onSubmit={handleAddProduct}>
         <h2>Add Product</h2>

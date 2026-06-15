@@ -30,9 +30,20 @@ let products = [
     },
 ];
 
+// Parallel queries — fetch stats while loading products
+app.get("/api/products/stats", (req, res) => {
+    const total = products.length
+    const averagePrice =
+      total === 0
+        ? 0
+        : products.reduce((sum, p) => sum + p.price, 0) / total
+  
+    setTimeout(() => {
+      res.json({ total, averagePrice: Number(averagePrice.toFixed(2)) })
+    }, 1500) // slow on purpose so you see parallel loading
+  })
+  
 app.get("/api/products", (req, res) => {
-
-    
     if(req.query.search) {
         const search = req.query.search;
         const filteredProducts = products.filter(product => product.name.toLowerCase().includes(search.toLowerCase()));
@@ -78,6 +89,7 @@ app.post("/api/products", (req, res) => {
     // For learning: we don't persist to a DB — just echo back the created product
     res.status(201).json(newProduct);
 });
+
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
