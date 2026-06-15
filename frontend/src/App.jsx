@@ -192,6 +192,7 @@ function App() {
               index === 0
                 ? {
                     ...page,
+                    total: (page.total ?? 0) + 1,
                     products: [
                       { id: tempId, ...newProduct },
                       ...page.products,
