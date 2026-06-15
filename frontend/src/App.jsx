@@ -23,8 +23,6 @@ function App() {
     // queryFn: () => axios.get(`/api/products?search=${search}`).then((res) => res.data),
     enabled:debouncedSearch.length === 0 || debouncedSearch.length > 2, //only fetch data when search is more than 2 characters
     placeholderData: keepPreviousData, //keep the previous data when the new data is loading
-    staleTime: 1000*60*5, //React Query won't refetch for 5 minutes and treat cached data as fresh
-    gcTime: 1000*60*10, //After you leave a search, its cache stays in memory for 10 min
   })
 
   const [name, setName] = useState('')

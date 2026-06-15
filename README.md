@@ -13,7 +13,7 @@ react-query/
 │   └── index.js      # GET /api/products + POST /api/products + optional ?search=
 └── frontend/         # React + Vite (port 5173)
     └── src/
-        ├── main.jsx  # QueryClientProvider + React Query DevTools
+        ├── main.jsx  # QueryClientProvider + defaultOptions + DevTools
         └── App.jsx   # useQuery + useMutation + search + debounce + enabled
 ```
 
@@ -43,7 +43,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 | Date | Focus | Progress | Status |
 |------|-------|----------|--------|
-| **11–15 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, `enabled` | **~55% overall** / **~85% fundamentals** | ✅ Learned |
+| **11–15 June 2026** | `useQuery`, caching, debounce, mutations, DevTools, `enabled`, `defaultOptions` | **~58% overall** / **~88% fundamentals** | ✅ Learned |
 
 **Quick jump:** [Learned](#-learned) · [Not learned yet](#-not-learned-yet)
 
@@ -51,7 +51,7 @@ Open http://localhost:5173 — Vite proxies `/api` → `http://localhost:3000`.
 
 ## ✅ Learned
 
-> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, and added **`enabled`** for conditional fetching.
+> Built the app, replaced manual `useEffect` fetching with React Query, learned caching deeply, added **mutations** and **cache invalidation**, used **DevTools** to visualize cache states, added **`enabled`** for conditional fetching, and moved **`staleTime` / `gcTime`** to global **`defaultOptions`**.
 
 ### What We Built
 
@@ -378,6 +378,50 @@ Use both together: debounce avoids rapid key changes; `enabled` blocks fetches t
 
 **Also fixed in Step 6:** `staleTime` / `gcTime` multiplier — use `1000 * 60 * 5` (5 min), not `10000 * 60 * 5` (~50 min). Same for `gcTime`: `1000 * 60 * 10` = 10 min.
 
+### Step 13 — Global `defaultOptions`
+
+**Problem:** `staleTime` and `gcTime` were set inside `App.jsx` on every `useQuery`. That works for one query, but in a real app you'd repeat the same values in many components.
+
+**Fix:** Set defaults once on `QueryClient` in `main.jsx` — every `useQuery` in the app inherits them.
+
+```jsx
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,  // 5 min
+      gcTime: 1000 * 60 * 10,    // 10 min
+    },
+  },
+})
+```
+
+Then **remove** `staleTime` and `gcTime` from `App.jsx` — the products query picks up the globals automatically.
+
+| Level | Where | Who gets it |
+|-------|--------|-------------|
+| **Global** | `main.jsx` → `QueryClient.defaultOptions.queries` | Every `useQuery` under `QueryClientProvider` |
+| **Per query** | `useQuery({ staleTime: ... })` in any component | Only that query — **overrides** global |
+
+**Key idea:** `QueryClient` lives at the root (`main.jsx`), not inside `App`. Any future component (`Navbar`, `Profile`, etc.) that calls `useQuery` gets the same cache timing without copy-pasting options.
+
+```
+main.jsx
+  QueryClient (defaultOptions: staleTime, gcTime)
+       ↓
+  QueryClientProvider
+       ↓
+  App.jsx → useQuery({ queryKey, queryFn, enabled, ... })  // inherits globals
+```
+
+**How we tested:**
+1. Removed `staleTime` / `gcTime` from `App.jsx`
+2. Empty search → still loads with 3s delay
+3. Search `mens` → caching still works (fresh within 5 min)
+4. Add product → `invalidateQueries` still refetches the list
+5. DevTools → same Fresh / Stale / Inactive behavior as before
+
+**Production pattern:** globals for shared defaults; per-query options only when one query needs something different (e.g. `staleTime: 0` for live dashboard data).
+
 ### What is Server State Management?
 
 React Query is a **server-state management** library. That name is easy to misread.
@@ -588,21 +632,21 @@ Practical patterns (debounce, search)      ████████████�
 Theory (server state, staleTime, gcTime)   ████████████████████  ~95%
 Mutations & sync (useMutation, invalidate) ████████████░░░░░░░░  ~60%
 DevTools & cache states (fresh/stale/…)    ██████████████░░░░░░  ~70%
-Query tuning (enabled)                     ██████████░░░░░░░░░░  ~50%
+Query tuning (enabled, defaults)             ███████████████░░░░░  ~75%
 Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░░░░░░░░░  ~0%
 ```
 
-**Solid foundation for reading, writing, and debugging server data.** Next up: global `defaultOptions` and advanced patterns (see [Not learned yet](#-not-learned-yet)).
+**Solid foundation for reading, writing, and debugging server data.** Next up: advanced patterns (see [Not learned yet](#-not-learned-yet)).
 
 ---
 
 ## 📋 Not learned yet
 
-> Pick up here when you're ready. The **Learned** section covers fundamentals through `enabled`; below is what’s still ahead — production tuning and advanced patterns.
+> Pick up here when you're ready. The **Learned** section covers fundamentals through **`defaultOptions`**; below is what’s still ahead — advanced patterns and polish.
 
 ### Priority checklist
 
-- [ ] **Global `defaultOptions`** — set `staleTime` / `gcTime` once in `QueryClient` instead of per query
+_All priority items learned._ Stretch goals below.
 
 ### Stretch goals (if time allows)
 
@@ -614,17 +658,17 @@ Advanced (infinite, optimistic, suspense)  ░░░░░░░░░░░░�
 
 ### Suggested learning order
 
-1. Move `staleTime` / `gcTime` to global `QueryClient` `defaultOptions`
-2. (Stretch) optimistic updates or infinite query
+1. (Stretch) optimistic updates or infinite query
+2. (Stretch) `prefetchQuery` or `refetchOnWindowFocus` tuning
 
 ### Targets (when you learn this)
 
 | Area | Now | Target |
 |------|-----|--------|
-| Overall React Query | ~55% | ~58% |
-| Core fundamentals | ~85% | ~88% |
+| Overall React Query | ~58% | ~65% |
+| Core fundamentals | ~88% | ~90% |
 | Mutations & sync | ~60% | ~70% |
-| Query tuning (defaults, prefetch) | ~25% | ~75% |
+| Advanced (infinite, optimistic, prefetch) | ~0% | ~40% |
 
 ### Topics for later (beyond this section)
 
